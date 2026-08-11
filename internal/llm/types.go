@@ -69,6 +69,10 @@ type ToolUseBlock struct {
 	ID    string          `json:"id"`
 	Name  string          `json:"name"`
 	Input json.RawMessage `json:"input"`
+
+	// Gemini rejects the next turn if the signature it put on a function call
+	// does not come back. Anthropic has no equivalent and 400s on it.
+	Signature string `json:"signature,omitempty"`
 }
 
 func (ToolUseBlock) blockType() string { return "tool_use" }
@@ -213,11 +217,11 @@ type Request struct {
 }
 
 type Usage struct {
-	InputTokens      int
-	OutputTokens     int
-	ThinkingTokens   int
-	CacheReadTokens  int
-	CacheWriteTokens int
+	InputTokens      int `json:"input,omitempty"`
+	OutputTokens     int `json:"output,omitempty"`
+	ThinkingTokens   int `json:"thinking,omitempty"`
+	CacheReadTokens  int `json:"cache_read,omitempty"`
+	CacheWriteTokens int `json:"cache_write,omitempty"`
 }
 
 type StopDetails struct {

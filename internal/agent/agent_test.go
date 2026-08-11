@@ -11,8 +11,9 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/zenodea/zaino/internal/anthropic"
 	"github.com/zenodea/zaino/internal/llm"
+	"github.com/zenodea/zaino/internal/provider/anthropic"
+	"github.com/zenodea/zaino/internal/tool"
 )
 
 type capturedRequest struct {
@@ -131,9 +132,9 @@ func TestRunExecutesToolsAndContinues(t *testing.T) {
 	)
 
 	ag, api := newTestAgent(t, toolTurn, textTurn("done"))
-	ag.Tools = []Tool{{
-		Definition: llm.Tool{Name: "echo", InputSchema: map[string]any{"type": "object"}},
-		Run: func(_ context.Context, input json.RawMessage) (string, error) {
+	ag.Tools = []tool.Tool{&tool.Func{
+		Def: llm.Tool{Name: "echo", InputSchema: map[string]any{"type": "object"}},
+		Do: func(_ context.Context, input json.RawMessage) (string, error) {
 			var in struct {
 				V string `json:"v"`
 			}
@@ -192,9 +193,9 @@ func TestRunToolErrorBecomesResult(t *testing.T) {
 	)
 
 	ag, _ := newTestAgent(t, toolTurn, textTurn("recovered"))
-	ag.Tools = []Tool{{
-		Definition: llm.Tool{Name: "boom", InputSchema: map[string]any{"type": "object"}},
-		Run: func(context.Context, json.RawMessage) (string, error) {
+	ag.Tools = []tool.Tool{&tool.Func{
+		Def: llm.Tool{Name: "boom", InputSchema: map[string]any{"type": "object"}},
+		Do: func(context.Context, json.RawMessage) (string, error) {
 			return "", errors.New("disk on fire")
 		},
 	}}
@@ -288,9 +289,9 @@ func TestRunMaxTurns(t *testing.T) {
 
 	ag, _ := newTestAgent(t, toolTurn, toolTurn, toolTurn)
 	ag.MaxTurns = 2
-	ag.Tools = []Tool{{
-		Definition: llm.Tool{Name: "spin", InputSchema: map[string]any{"type": "object"}},
-		Run:        func(context.Context, json.RawMessage) (string, error) { return "again", nil },
+	ag.Tools = []tool.Tool{&tool.Func{
+		Def: llm.Tool{Name: "spin", InputSchema: map[string]any{"type": "object"}},
+		Do:  func(context.Context, json.RawMessage) (string, error) { return "again", nil },
 	}}
 
 	_, err := ag.Run(context.Background(), []llm.Message{llm.UserText("go")})

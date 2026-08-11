@@ -2,20 +2,14 @@ package agent
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"sync"
 
 	"github.com/zenodea/zaino/internal/llm"
+	"github.com/zenodea/zaino/internal/permission"
+	"github.com/zenodea/zaino/internal/tool"
 )
-
-type ToolFunc func(ctx context.Context, input json.RawMessage) (string, error)
-
-type Tool struct {
-	Definition llm.Tool
-	Run        ToolFunc
-}
 
 type Hooks struct {
 	OnTextDelta     func(text string)
@@ -34,7 +28,8 @@ type Agent struct {
 	Effort    string
 	Thinking  *llm.Thinking
 
-	Tools []Tool
+	Tools []tool.Tool
+	Gate  *permission.Gate
 
 	MaxTurns int
 
@@ -112,7 +107,7 @@ func (a *Agent) turn(ctx context.Context, history []llm.Message) (*llm.Response,
 		Effort:    a.Effort,
 	}
 	for _, t := range a.Tools {
-		req.Tools = append(req.Tools, t.Definition)
+		req.Tools = append(req.Tools, t.Definition())
 	}
 
 	stream, err := a.Provider.Stream(ctx, req)
@@ -147,56 +142,93 @@ func (a *Agent) turn(ctx context.Context, history []llm.Message) (*llm.Response,
 // making parallel calls.
 func (a *Agent) runTools(ctx context.Context, calls []llm.ToolUseBlock) llm.Content {
 	results := make(llm.Content, len(calls))
+	admitted := make([]tool.Call, len(calls))
 
-	var wg sync.WaitGroup
+	// Asking has to happen one at a time, or a batch of calls would put several
+	// questions on screen at once.
 	for i, call := range calls {
 		if a.Hooks.OnToolCall != nil {
 			a.Hooks.OnToolCall(call)
 		}
+		ready, err := a.admit(ctx, call)
+		if err != nil {
+			results[i] = a.result(call, "Error: "+err.Error(), true)
+			continue
+		}
+		admitted[i] = ready
+	}
+
+	var wg sync.WaitGroup
+	for i, ready := range admitted {
+		if ready == nil || ready.Request().Action != permission.Read {
+			continue
+		}
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			out, isErr := a.invoke(ctx, call)
-			results[i] = llm.ToolResultBlock{
-				ToolUseID: call.ID,
-				Content:   out,
-				IsError:   isErr,
-			}
-			if a.Hooks.OnToolResult != nil {
-				a.Hooks.OnToolResult(call, out, isErr)
-			}
+			results[i] = a.execute(ctx, calls[i], ready)
 		}()
 	}
 	wg.Wait()
+
+	for i, ready := range admitted {
+		if ready == nil || ready.Request().Action == permission.Read {
+			continue
+		}
+		results[i] = a.execute(ctx, calls[i], ready)
+	}
 	return results
 }
 
-func (a *Agent) invoke(ctx context.Context, call llm.ToolUseBlock) (out string, isErr bool) {
-	tool, ok := a.lookup(call.Name)
+func (a *Agent) admit(ctx context.Context, call llm.ToolUseBlock) (ready tool.Call, err error) {
+	t, ok := a.lookup(call.Name)
 	if !ok {
-		return fmt.Sprintf("Error: no tool named %q is available.", call.Name), true
+		return nil, fmt.Errorf("no tool named %q is available", call.Name)
 	}
 
 	defer func() {
 		if r := recover(); r != nil {
-			out, isErr = fmt.Sprintf("Error: tool %q panicked: %v", call.Name, r), true
+			ready, err = nil, fmt.Errorf("tool %q panicked while preparing: %v", call.Name, r)
 		}
 	}()
 
-	result, err := tool.Run(ctx, call.Input)
-	if err != nil {
-		return "Error: " + err.Error(), true
+	if ready, err = t.Prepare(call.Input); err != nil {
+		return nil, err
 	}
-	return result, false
+	if err := a.Gate.Check(ctx, ready.Request()); err != nil {
+		return nil, err
+	}
+	return ready, nil
 }
 
-func (a *Agent) lookup(name string) (Tool, bool) {
+func (a *Agent) execute(ctx context.Context, call llm.ToolUseBlock, ready tool.Call) (block llm.ToolResultBlock) {
+	defer func() {
+		if r := recover(); r != nil {
+			block = a.result(call, fmt.Sprintf("Error: tool %q panicked: %v", call.Name, r), true)
+		}
+	}()
+
+	out, err := ready.Run(ctx)
+	if err != nil {
+		return a.result(call, "Error: "+err.Error(), true)
+	}
+	return a.result(call, out, false)
+}
+
+func (a *Agent) result(call llm.ToolUseBlock, out string, isErr bool) llm.ToolResultBlock {
+	if a.Hooks.OnToolResult != nil {
+		a.Hooks.OnToolResult(call, out, isErr)
+	}
+	return llm.ToolResultBlock{ToolUseID: call.ID, Content: out, IsError: isErr}
+}
+
+func (a *Agent) lookup(name string) (tool.Tool, bool) {
 	for _, t := range a.Tools {
-		if t.Definition.Name == name {
+		if t.Definition().Name == name {
 			return t, true
 		}
 	}
-	return Tool{}, false
+	return nil, false
 }
 
 func orDefault[T comparable](v, fallback T) T {

@@ -13,6 +13,11 @@ type Provider interface {
 	Stream(ctx context.Context, req Request) (Stream, error)
 }
 
+// ModelLister is optional: a provider that knows its own model ids says so.
+type ModelLister interface {
+	Models() []string
+}
+
 type Stream interface {
 	Next() bool
 	Event() Event

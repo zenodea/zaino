@@ -9,8 +9,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/zenodea/zaino/internal/gemini"
 	"github.com/zenodea/zaino/internal/llm"
+	"github.com/zenodea/zaino/internal/provider/gemini"
+	"github.com/zenodea/zaino/internal/tool"
 )
 
 func TestRunAgainstGeminiProvider(t *testing.T) {
@@ -45,12 +46,12 @@ func TestRunAgainstGeminiProvider(t *testing.T) {
 	ag := &Agent{
 		Provider:  provider,
 		MaxTokens: 1024,
-		Tools: []Tool{{
-			Definition: llm.Tool{
+		Tools: []tool.Tool{&tool.Func{
+			Def: llm.Tool{
 				Name:        "echo",
 				InputSchema: map[string]any{"type": "object", "additionalProperties": false},
 			},
-			Run: func(_ context.Context, input json.RawMessage) (string, error) {
+			Do: func(_ context.Context, input json.RawMessage) (string, error) {
 				var in struct {
 					V string `json:"v"`
 				}
