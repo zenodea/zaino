@@ -14,10 +14,12 @@ import (
 	"github.com/zenodea/zaino/internal/frontend/repl"
 	"github.com/zenodea/zaino/internal/frontend/tui"
 	"github.com/zenodea/zaino/internal/llm"
+	"github.com/zenodea/zaino/internal/permission"
 	"github.com/zenodea/zaino/internal/provider"
 	"github.com/zenodea/zaino/internal/store/recall"
 	"github.com/zenodea/zaino/internal/store/session"
 	"github.com/zenodea/zaino/internal/store/wirelog"
+	"github.com/zenodea/zaino/internal/tool"
 	"github.com/zenodea/zaino/internal/x/httpx"
 )
 
@@ -39,6 +41,19 @@ func run() error {
 		showThink = flag.Bool("thinking", false, "request and display model reasoning")
 		plain     = flag.Bool("plain", false, "line-based REPL instead of the full-screen UI")
 		verbose   = flag.Bool("v", false, "print per-turn token usage (implies -plain)")
+
+		permMode = flag.String("permission", string(permission.Manual),
+			"when tools stop to ask: "+strings.Join(permission.ModeNames(), "|"))
+		allowOutside = flag.Bool("allow-outside", false,
+			"let tools reach outside the working directory")
+		toolNames    = flag.String("tools", "", "give the model only these tools (comma separated)")
+		excludeTools = flag.String("exclude-tools", "", "withhold these tools")
+		noTools      = flag.Bool("no-tools", false, "give the model no tools at all")
+
+		vimKeys = flag.Bool("vim", true, "modal editing in the composer; -vim=false for plain input")
+		mouse   = flag.Bool("mouse", false,
+			"scroll with the wheel, at the cost of selecting text with the mouse")
+		animate = flag.Bool("animate", true, "ease the transcript when ⌃j/⌃k move through it")
 
 		carryOn  = flag.Bool("continue", false, "carry on the newest session for this directory")
 		resumeID = flag.String("resume", "", "carry on a session by id, or any prefix of one")
@@ -91,6 +106,11 @@ func run() error {
 		return explainCredentials(err)
 	}
 
+	gate, tools, err := openToolbox(*permMode, *allowOutside, *noTools, *toolNames, *excludeTools)
+	if err != nil {
+		return err
+	}
+
 	ag := &agent.Agent{
 		Provider:  backend,
 		Model:     *model,
@@ -98,6 +118,8 @@ func run() error {
 		System:    *system,
 		Effort:    *effort,
 		Thinking:  &llm.Thinking{Enabled: true, Show: *showThink},
+		Tools:     tools,
+		Gate:      gate,
 	}
 	applyRestored(ag, restored, given)
 
@@ -118,6 +140,8 @@ func run() error {
 			Provider:     backend.Name(),
 			ShowThinking: *showThink,
 			Verbose:      *verbose,
+			Interactive:  isTerminal(os.Stdin),
+			Gate:         gate,
 			Repo:         repo,
 			Recorder:     rec,
 			Restored:     restored,
@@ -126,6 +150,9 @@ func run() error {
 	}
 
 	m := tui.New(ag, backend.Name())
+	gate.Approver = m.Approver()
+	m.UseVim(*vimKeys)
+	m.UseAnimation(*animate)
 	if list, err := recall.Open(); err == nil {
 		m.UseRecall(list)
 	} else {
@@ -138,9 +165,54 @@ func run() error {
 		m.Restore(restored)
 	}
 
-	program := tea.NewProgram(m, tea.WithAltScreen(), tea.WithMouseCellMotion())
+	options := []tea.ProgramOption{tea.WithAltScreen()}
+	// Grabbing the mouse takes selection away from the terminal, so it is off by
+	// default; without it the wheel arrives as ↑/↓ and lands on prompt recall.
+	if *mouse {
+		options = append(options, tea.WithMouseCellMotion())
+	}
+
+	program := tea.NewProgram(m, options...)
 	_, err = program.Run()
 	return err
+}
+
+func openToolbox(mode string, allowOutside, noTools bool, allow, deny string) (*permission.Gate, []tool.Tool, error) {
+	parsed, err := permission.ParseMode(mode)
+	if err != nil {
+		return nil, nil, err
+	}
+	policy := permission.NewPolicy(parsed)
+	policy.AllowOutside = allowOutside
+	gate := &permission.Gate{Policy: policy}
+
+	if noTools {
+		return gate, nil, nil
+	}
+
+	cwd, err := os.Getwd()
+	if err != nil {
+		return nil, nil, err
+	}
+	workspace, err := tool.NewWorkspace(cwd)
+	if err != nil {
+		return nil, nil, err
+	}
+	tools, err := tool.Select(tool.All(workspace), commaList(allow), commaList(deny))
+	if err != nil {
+		return nil, nil, err
+	}
+	return gate, tools, nil
+}
+
+func commaList(s string) []string {
+	var out []string
+	for _, part := range strings.Split(s, ",") {
+		if part = strings.TrimSpace(part); part != "" {
+			out = append(out, part)
+		}
+	}
+	return out
 }
 
 func openSession(noSave bool, resumeID string, carryOn bool) (session.Repo, session.Store, error) {

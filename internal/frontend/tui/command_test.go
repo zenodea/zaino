@@ -289,16 +289,37 @@ func TestMenuKeepsSelectionWhileNarrowing(t *testing.T) {
 	}
 }
 
-func TestMenuEscapeAndStreaming(t *testing.T) {
+func TestEscapeLeavesTheMenuAlone(t *testing.T) {
 	m := newTestModel(t, 80, 24)
-	typeLine(m, "/")
+	typeLine(m, "/m")
+	height := m.viewport.Height
 
 	m.Update(tea.KeyMsg{Type: tea.KeyEsc})
-	if m.menu.open {
-		t.Error("escape should dismiss the menu")
+	if !m.menu.open {
+		t.Error("escape closed the menu")
+	}
+	if m.viewport.Height != height {
+		t.Errorf("viewport went from %d to %d on escape", height, m.viewport.Height)
+	}
+}
+
+func TestTypingPastACommandClosesTheMenu(t *testing.T) {
+	m := newTestModel(t, 80, 24)
+	typeLine(m, "/m")
+	if !m.menu.open {
+		t.Fatal("the menu never opened")
 	}
 
+	typeLine(m, "/etc/hosts is wrong")
+	if m.menu.open {
+		t.Error("the menu stayed open for something that is not a command")
+	}
+}
+
+func TestMenuStaysShutMidTurn(t *testing.T) {
+	m := newTestModel(t, 80, 24)
 	m.streaming = true
+
 	typeLine(m, "/cl")
 	if m.menu.open {
 		t.Error("the menu must stay shut mid-turn")

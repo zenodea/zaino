@@ -101,7 +101,7 @@ func TestFailedToolRenders(t *testing.T) {
 	}
 }
 
-func TestHangingIndent(t *testing.T) {
+func TestContinuationLinesAlign(t *testing.T) {
 	m := newTestModel(t, 40, 24)
 	send(m, textDeltaMsg(strings.Repeat("word ", 40)))
 
@@ -109,14 +109,33 @@ func TestHangingIndent(t *testing.T) {
 	if len(lines) < 2 {
 		t.Fatalf("expected wrapping at width 40, got %d line(s)", len(lines))
 	}
-	if !strings.HasPrefix(lines[0], "◆") {
-		t.Errorf("first line should carry the marker, got %q", lines[0])
-	}
+
 	for i, line := range lines[1:] {
-		if !strings.HasPrefix(line, strings.Repeat(" ", gutterWidth)) {
-			t.Errorf("continuation line %d not indented into the gutter: %q", i+1, line)
+		if got := leadingSpaces(stripANSI(line)); got != gutterWidth {
+			t.Errorf("continuation line %d starts at column %d, want %d: %q",
+				i+1, got, gutterWidth, stripANSI(line))
 		}
 	}
+}
+
+func TestMarkedEntryHangsUnderItsText(t *testing.T) {
+	m := newTestModel(t, 40, 24)
+	send(m, thinkDeltaMsg(strings.Repeat("thought ", 20)))
+
+	lines := strings.Split(m.rendered[0], "\n")
+	if len(lines) < 2 {
+		t.Fatalf("expected wrapping, got %d line(s)", len(lines))
+	}
+	if !strings.Contains(stripANSI(lines[0]), "⋯") {
+		t.Fatalf("no marker on the first line: %q", stripANSI(lines[0]))
+	}
+	if got, want := leadingSpaces(stripANSI(lines[1])), gutterWidth; got != want {
+		t.Errorf("continuation starts at column %d, want %d (under the text, not the marker)", got, want)
+	}
+}
+
+func leadingSpaces(s string) int {
+	return len(s) - len(strings.TrimLeft(s, " "))
 }
 
 func TestUsageAccumulates(t *testing.T) {

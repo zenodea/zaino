@@ -10,6 +10,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/zenodea/zaino/internal/llm"
+	"github.com/zenodea/zaino/internal/permission"
 	"github.com/zenodea/zaino/internal/provider"
 	"github.com/zenodea/zaino/internal/store/session"
 )
@@ -66,6 +67,24 @@ func commandList() []command {
 			arg:     "[prompt|-]",
 			summary: "show, set, or (with -) drop the system prompt",
 			run:     cmdSystem,
+		},
+		{
+			name:    "permission",
+			aliases: []string{"perm", "mode"},
+			arg:     "[mode]",
+			summary: "show or set when tools stop to ask",
+			run:     cmdPermission,
+		},
+		{
+			name:    "tools",
+			summary: "list the tools the model has",
+			run:     cmdTools,
+		},
+		{
+			name:    "vim",
+			arg:     "[on|off]",
+			summary: "modal editing in the composer",
+			run:     cmdVim,
 		},
 		{
 			name:    "usage",
@@ -347,6 +366,68 @@ func cmdSystem(m *Model, arg string) tea.Cmd {
 		m.agent.System = arg
 		m.record(session.System(arg))
 		m.notice("system prompt set (%d chars)", len(arg))
+	}
+	return nil
+}
+
+func cmdPermission(m *Model, arg string) tea.Cmd {
+	gate := m.agent.Gate
+	if gate == nil || gate.Policy == nil {
+		m.notice("permission: nothing is gated")
+		return nil
+	}
+
+	if arg == "" {
+		m.notice("permission: %s — %s", gate.Mode(), gate.Mode().Describe())
+		if granted := gate.Policy.Granted(); len(granted) > 0 {
+			m.notice("allowed for this session: %s", strings.Join(granted, ", "))
+		}
+		return nil
+	}
+
+	mode, err := permission.ParseMode(arg)
+	if err != nil {
+		m.push(entry{kind: entryError, text: err.Error()})
+		return nil
+	}
+	gate.Policy.SetMode(mode)
+	m.notice("permission → %s · %s", mode, mode.Describe())
+	return nil
+}
+
+func cmdTools(m *Model, _ string) tea.Cmd {
+	if len(m.agent.Tools) == 0 {
+		m.notice("no tools — the model can only talk")
+		return nil
+	}
+	lines := []string{fmt.Sprintf("tools · %s", m.agent.Gate.Mode())}
+	for _, t := range m.agent.Tools {
+		def := t.Definition()
+		lines = append(lines, fmt.Sprintf("  %-6s %s", def.Name, firstSentence(def.Description)))
+	}
+	m.notice("%s", strings.Join(lines, "\n"))
+	return nil
+}
+
+func firstSentence(s string) string {
+	if i := strings.Index(s, ". "); i > 0 {
+		return s[:i+1]
+	}
+	return s
+}
+
+func cmdVim(m *Model, arg string) tea.Cmd {
+	switch arg {
+	case "":
+		m.notice("vim: %s", onOff(m.vimEnabled()))
+	case "on", "true":
+		m.UseVim(true)
+		m.notice("vim → on (esc for normal mode)")
+	case "off", "false":
+		m.UseVim(false)
+		m.notice("vim → off")
+	default:
+		m.push(entry{kind: entryError, text: fmt.Sprintf("usage: /vim [on|off], got %q", arg)})
 	}
 	return nil
 }

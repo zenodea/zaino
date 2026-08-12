@@ -72,6 +72,7 @@ func (m *Model) complete() {
 	m.syncInputChrome()
 	if c.arg == "" {
 		m.menu = menu{}
+		m.syncHeight()
 	}
 }
 

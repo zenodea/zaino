@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -35,7 +36,9 @@ func (m *Model) openPicker() {
 		return
 	}
 
-	m.picker = picker{open: true, items: items}
+	slices.Reverse(items)
+
+	m.picker = picker{open: true, items: items, cursor: len(items) - 1}
 	for i, s := range items {
 		if s.ID == m.sessionID() {
 			m.picker.cursor = i
@@ -51,26 +54,26 @@ func (m *Model) closePicker() {
 }
 
 func (m *Model) handlePickerKey(msg tea.KeyMsg) tea.Cmd {
-	switch msg.String() {
-	case "up", "ctrl+p", "shift+tab":
+	switch key := msg.String(); key {
+	case "up", "k", "ctrl+p", "shift+tab":
 		m.movePicker(-1)
-	case "down", "ctrl+n", "tab":
+	case "down", "j", "ctrl+n", "tab":
 		m.movePicker(1)
-	case "pgup":
-		m.movePicker(-pickerRows)
-	case "pgdown":
-		m.movePicker(pickerRows)
-	case "home":
-		m.picker.cursor = 0
-	case "end":
-		m.picker.cursor = len(m.picker.items) - 1
-	case "enter":
+	case "pgup", "ctrl+u", "ctrl+b":
+		m.movePicker(-m.pickerRows())
+	case "pgdown", "ctrl+d", "ctrl+f":
+		m.movePicker(m.pickerRows())
+	case "home", "g":
+		m.movePicker(-len(m.picker.items))
+	case "end", "G":
+		m.movePicker(len(m.picker.items))
+	case "enter", "l", "o":
 		if m.picker.cursor < len(m.picker.items) {
 			id := m.picker.items[m.picker.cursor].ID
 			m.closePicker()
 			m.resume(id)
 		}
-	case "esc", "q", "ctrl+c":
+	case "esc", "q", "h", "ctrl+c":
 		m.closePicker()
 	}
 	return nil
@@ -147,15 +150,18 @@ func (m *Model) resume(id string) {
 	}
 }
 
-const pickerRows = 12
+const pickerChrome = 2
+
+func (m *Model) pickerRows() int {
+	return max(m.viewport.Height-pickerChrome, 3)
+}
 
 func (m *Model) pickerView() string {
-	rows := min(pickerRows, m.viewport.Height)
+	rows := m.pickerRows()
 	items, cursor := m.pickerWindow(rows)
 
 	lines := make([]string, 0, len(items)+2)
-	lines = append(lines, metaStyle.Render(
-		fmt.Sprintf("sessions · %d · ⏎ resume · esc back", len(m.picker.items))))
+	lines = append(lines, m.pickerHeading())
 	lines = append(lines, "")
 
 	for i, s := range items {
@@ -188,6 +194,11 @@ func (m *Model) pickerWindow(rows int) ([]session.Summary, int) {
 	}
 	start := min(max(m.picker.cursor-rows/2, 0), len(m.picker.items)-rows)
 	return m.picker.items[start : start+rows], m.picker.cursor - start
+}
+
+func (m *Model) pickerHeading() string {
+	return metaStyle.Render(fmt.Sprintf("sessions · %d of %d",
+		m.picker.cursor+1, len(m.picker.items)))
 }
 
 func when(t time.Time) string {

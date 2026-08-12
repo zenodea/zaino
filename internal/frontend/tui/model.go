@@ -15,6 +15,7 @@ import (
 
 	"github.com/zenodea/zaino/internal/agent"
 	"github.com/zenodea/zaino/internal/llm"
+	"github.com/zenodea/zaino/internal/permission"
 	"github.com/zenodea/zaino/internal/store/recall"
 	"github.com/zenodea/zaino/internal/store/session"
 	"github.com/zenodea/zaino/internal/store/wirelog"
@@ -76,7 +77,16 @@ type Model struct {
 	sessionUsage llm.Usage
 	lastModel    string
 
-	quitting bool
+	pending *pendingAsk
+	vim     vim
+
+	cursor  int
+	tops    []int
+	heights []int
+	motion  motion
+
+	quitting  bool
+	quitArmed bool
 }
 
 func New(ag *agent.Agent, providerName string) *Model {
@@ -102,6 +112,7 @@ func New(ag *agent.Agent, providerName string) *Model {
 		spinner:  sp,
 		rec:      session.NewRecorder(nil),
 		events:   make(chan tea.Msg, 64),
+		cursor:   -1,
 	}
 }
 
@@ -137,14 +148,20 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case toolCallMsg:
 		m.push(entry{
-			kind:     entryTool,
-			toolName: msg.Call.Name,
-			toolArgs: compactArgs(msg.Call.Input, argsLimit),
+			kind:      entryTool,
+			toolName:  msg.Call.Name,
+			toolArgs:  compactArgs(msg.Call.Input, argsLimit),
+			toolInput: string(msg.Call.Input),
 		})
 		return m, m.waitForEvent()
 
 	case toolResultMsg:
 		m.completeTool(msg)
+		return m, m.waitForEvent()
+
+	case askMsg:
+		m.pending = &pendingAsk{req: msg.req, reply: msg.reply}
+		m.syncViewport()
 		return m, m.waitForEvent()
 
 	case turnMsg:
@@ -161,6 +178,23 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case doneMsg:
 		m.finishTurn(msg)
 		return m, m.waitForEvent()
+
+	case frameMsg:
+		return m, m.step()
+
+	case tea.MouseMsg:
+		if m.picker.open {
+			switch msg.Button {
+			case tea.MouseButtonWheelUp:
+				m.movePicker(-1)
+			case tea.MouseButtonWheelDown:
+				m.movePicker(1)
+			}
+			return m, nil
+		}
+		var cmd tea.Cmd
+		m.viewport, cmd = m.viewport.Update(msg)
+		return m, cmd
 	}
 
 	var cmd tea.Cmd
@@ -170,9 +204,33 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if m.pending != nil {
+		m.quitArmed = false
+		return m.handleAskKey(msg)
+	}
+
 	if m.picker.open {
+		m.quitArmed = false
 		return m, m.handlePickerKey(msg)
 	}
+
+	if msg.String() == "esc" && !m.vimEnabled() && m.streaming && m.cancel != nil {
+		m.cancel()
+		return m, nil
+	}
+
+	if m.inNormalMode() && !m.menu.open {
+		return m.handleNormalKey(msg)
+	}
+	if m.vimEnabled() && msg.String() == "esc" && !m.menu.open {
+		m.enterNormal()
+		return m, nil
+	}
+
+	return m.handleAppKey(msg)
+}
+
+func (m *Model) handleAppKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	if m.menu.open {
 		switch msg.String() {
@@ -192,42 +250,54 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				m.syncInputChrome()
 				return m, c.run(m, "")
 			}
-		case "esc":
-			m.menu = menu{}
-			return m, nil
 		}
 	}
 
+	armed := m.quitArmed
+	m.quitArmed = false
+
 	switch msg.String() {
 	case "ctrl+c":
-
 		if m.streaming && m.cancel != nil {
 			m.cancel()
 			return m, nil
 		}
-		m.quitting = true
-		return m, tea.Quit
-
-	case "ctrl+d":
-		m.quitting = true
-		return m, tea.Quit
+		if armed {
+			m.quitting = true
+			return m, tea.Quit
+		}
+		m.quitArmed = true
+		return m, nil
 
 	case "enter":
 		if m.streaming {
 			return m, nil
 		}
+		if m.toggleSelected() {
+			return m, nil
+		}
 		return m, m.submit()
 
 	case "ctrl+j":
+		return m, m.moveCursor(1)
+
+	case "ctrl+k":
+		return m, m.moveCursor(-1)
+
+	case "alt+enter", "shift+enter", "ctrl+o":
 		m.input.InsertString("\n")
 		m.syncInputChrome()
 		return m, nil
 
-	case "ctrl+l":
-		m.reset()
+	case "shift+tab":
+		if gate := m.agent.Gate; gate != nil && gate.Policy != nil {
+			mode := gate.Mode().Next()
+			gate.Policy.SetMode(mode)
+			m.notice("permission → %s", mode)
+		}
 		return m, nil
 
-	case "pgup", "pgdown", "ctrl+u", "ctrl+b", "ctrl+f", "shift+up", "shift+down":
+	case "pgup", "pgdown", "ctrl+u", "ctrl+d", "ctrl+b", "ctrl+f", "shift+up", "shift+down":
 		var cmd tea.Cmd
 		m.viewport, cmd = m.viewport.Update(msg)
 		return m, cmd
@@ -247,8 +317,11 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
 	m.input, cmd = m.input.Update(msg)
 	// Editing by hand ends the browse: the box is yours again.
-	if m.recall != nil && m.input.Value() != before {
-		m.recall.Reset()
+	if m.input.Value() != before {
+		m.clearCursor()
+		if m.recall != nil {
+			m.recall.Reset()
+		}
 	}
 	m.syncInputChrome()
 	return m, cmd
@@ -394,6 +467,7 @@ func (m *Model) clearContext() {
 	m.messages = nil
 	m.entries = nil
 	m.rendered = nil
+	m.cursor = -1
 	m.sessionUsage = llm.Usage{}
 }
 
@@ -406,7 +480,7 @@ func (m *Model) push(e entry) {
 func (m *Model) appendToOpenEntry(kind entryKind, text string) {
 	if n := len(m.entries); n > 0 && m.entries[n-1].kind == kind {
 		m.entries[n-1].text += text
-		m.rendered[n-1] = m.entries[n-1].render(m.contentWidth())
+		m.rendered[n-1] = m.entries[n-1].renderAs(m.contentWidth(), m.barFor(n-1))
 		m.syncViewport()
 		return
 	}
@@ -422,8 +496,9 @@ func (m *Model) completeTool(msg toolResultMsg) {
 		e.done = true
 		e.failed = msg.IsError
 		e.resultLen = len(msg.Result)
+		e.toolResult = msg.Result
 		m.entries[i] = e
-		m.rendered[i] = e.render(m.contentWidth())
+		m.rendered[i] = e.renderAs(m.contentWidth(), m.barFor(i))
 		m.syncViewport()
 		return
 	}
@@ -440,22 +515,64 @@ func (m *Model) syncViewport() {
 	}
 }
 
-func (m *Model) transcript() string {
-	parts := make([]string, 0, len(m.rendered))
-	for _, r := range m.rendered {
-		if r != "" {
-			parts = append(parts, r)
-		}
+func (m *Model) splash() string {
+	keys := []string{
+		keyHint("⏎", "send"),
+		keyHint("/", "commands"),
+		keyHint("⇧⇥", "permission mode"),
+		keyHint("esc", "normal mode"),
 	}
-	return strings.Join(parts, "\n\n")
+	lines := append(strings.Split(logo(), "\n"),
+		"",
+		hintStyle.Render("an agent harness, in a backpack"),
+		"",
+		strings.Join(keys, metaStyle.Render("  ·  ")),
+	)
+	return lipgloss.NewStyle().PaddingTop(1).Render(strings.Join(lines, "\n"))
+}
+
+func (m *Model) transcript() string {
+	if len(m.entries) == 0 {
+		return m.splash()
+	}
+
+	var out []string
+	previous := entryNotice
+
+	// Where each entry lands is recorded as the transcript is built. Counting it
+	// again afterwards means counting the blank lines between entries too.
+	m.tops = make([]int, len(m.entries))
+	m.heights = make([]int, len(m.entries))
+
+	for i, rendered := range m.rendered {
+		if rendered == "" {
+			continue
+		}
+		kind := m.entries[i].kind
+
+		if len(out) > 0 && !(tight(previous) && tight(kind)) {
+			out = append(out, "")
+		}
+
+		m.tops[i] = len(out)
+		m.heights[i] = strings.Count(rendered, "\n") + 1
+		out = append(out, rendered)
+		previous = kind
+	}
+	return strings.Join(out, "\n")
+}
+
+func tight(kind entryKind) bool {
+	return kind == entryThinking || kind == entryTool
 }
 
 func (m *Model) rerender() {
 	width := m.contentWidth()
 	m.rendered = m.rendered[:0]
-	for _, e := range m.entries {
-		m.rendered = append(m.rendered, e.render(width))
+	for i, e := range m.entries {
+		m.rendered = append(m.rendered, e.renderAs(width, m.barFor(i)))
 	}
+	m.syncViewport()
 }
 
 func (m *Model) contentWidth() int { return max(m.width-2, 20) }
@@ -482,7 +599,7 @@ func (m *Model) resize(width, height int) {
 }
 
 func (m *Model) viewportHeight() int {
-	chrome := 1 + 1 + 1 + m.input.Height() + m.menuHeight() + 1
+	chrome := 1 + 1 + 1 + 1 + m.input.Height() + m.menuHeight() + 1
 	return max(m.height-chrome, 3)
 }
 
@@ -491,7 +608,12 @@ func (m *Model) syncInputChrome() {
 		m.input.SetHeight(want)
 	}
 	m.refreshMenu()
+	m.syncHeight()
+}
 
+// The panel takes room from the transcript, so the viewport has to be resized
+// in the same breath as the panel opening or closing.
+func (m *Model) syncHeight() {
 	if !m.ready {
 		return
 	}
@@ -511,29 +633,37 @@ func (m *Model) View() string {
 
 	pad := lipgloss.NewStyle().PaddingLeft(1)
 
-	body := m.viewport.View()
 	if m.picker.open {
-		body = m.pickerView()
+		return strings.Join([]string{
+			pad.Render(m.header()),
+			"",
+			pad.Render(m.pickerView()),
+			pad.Render(rule(m.contentWidth())),
+			pad.Render(m.pickerFooter()),
+		}, "\n")
 	}
 
 	lines := []string{
 		pad.Render(m.header()),
 		"",
-		pad.Render(body),
+		pad.Render(m.viewport.View()),
 	}
-	if panel := m.menuView(); panel != "" {
+	if panel := m.askView(); panel != "" {
+		lines = append(lines, "", pad.Render(panel))
+	} else if panel := m.menuView(); panel != "" {
 		lines = append(lines, "", pad.Render(panel))
 	}
 	lines = append(lines,
 		pad.Render(rule(m.contentWidth())),
 		pad.Render(m.inputView()),
+		"",
 		pad.Render(m.footer()),
 	)
 	return strings.Join(lines, "\n")
 }
 
 func (m *Model) header() string {
-	left := brandStyle.Render("▚ zaino")
+	left := brandMark() + " " + brandStyle.Render("zaino")
 
 	right := metaStyle.Render(m.provider + " · " + m.modelName())
 	if m.agent.Effort != "" {
@@ -552,34 +682,142 @@ func (m *Model) inputView() string {
 	if m.streaming {
 		marker = m.spinner.View()
 	}
-	return marker + strings.Repeat(" ", gutterWidth-lipgloss.Width(marker)) + m.input.View()
+
+	body := m.input.View()
+	if m.inVisualMode() {
+		body = m.visualView()
+	}
+
+	pad := strings.Repeat(" ", gutterWidth-lipgloss.Width(marker))
+	lines := strings.Split(body, "\n")
+	for i, line := range lines {
+		if i == 0 {
+			lines[i] = marker + pad + line
+			continue
+		}
+		lines[i] = strings.Repeat(" ", gutterWidth) + line
+	}
+	return strings.Join(lines, "\n")
+}
+
+func (m *Model) pickerFooter() string {
+	return hintStyle.Render("j/k or ↑↓ move · ⏎ resume · g/G ends · q back")
 }
 
 func (m *Model) footer() string {
-	roomy := m.contentWidth() >= 64
-
-	var hint string
-	switch {
-	case m.streaming:
-		hint = fmt.Sprintf("working %s · ⌃c stop",
-			time.Since(m.startedAt).Round(time.Second))
-	case m.menu.open && roomy:
-		hint = "⇥ complete · ⏎ run · ↑↓ choose · esc dismiss"
-	case m.menu.open:
-		hint = "⇥ complete · ⏎ run · esc dismiss"
-	case roomy:
-		hint = "⏎ send · ⌃j newline · / commands · ⌃l clear · ⌃d quit"
-	default:
-		hint = "⏎ send · / commands · ⌃d quit"
-	}
-	left := hintStyle.Render(hint)
-
+	status := m.status()
 	right := metaStyle.Render(m.usageLine())
+
+	room := m.contentWidth() - lipgloss.Width(status) - lipgloss.Width(right) - 1
+	left := status + hintStyle.Render(fit(m.hints(), room))
+
 	gap := m.contentWidth() - lipgloss.Width(left) - lipgloss.Width(right)
 	if gap < 1 {
 		return clamp(left, m.contentWidth())
 	}
 	return left + strings.Repeat(" ", gap) + right
+}
+
+func (m *Model) hints() []string {
+	switch {
+	case m.quitArmed:
+		return []string{
+			"⌃c again to quit · /exit also works · any other key to stay",
+			"⌃c again to quit · any key to stay",
+			"⌃c again to quit",
+		}
+
+	case m.pending != nil:
+		return []string{"waiting on you · y allow · a session · n refuse", "y · a · n"}
+
+	case m.streaming:
+		return []string{fmt.Sprintf("working %s · ⌃c stop",
+			time.Since(m.startedAt).Round(time.Second)), "⌃c stop"}
+
+	case m.menu.open:
+		return []string{
+			"⇥ complete · ⏎ run · ↑↓ choose · esc dismiss",
+			"⇥ complete · ⏎ run · esc dismiss",
+			"⏎ run · esc",
+		}
+
+	case m.cursor >= 0:
+		return []string{
+			"⏎ expand · ⌃j⌃k move · type to go back to the composer",
+			"⏎ expand · ⌃j⌃k move",
+			"⏎ expand",
+		}
+
+	case m.inVisualMode():
+		return []string{
+			"hjkl w b e extend · d delete · c change · y yank · esc cancel",
+			"hjkl extend · d delete · c change · y yank · esc",
+			"d delete · c change · y yank · esc",
+		}
+
+	case m.inNormalMode():
+		return []string{
+			"⏎ send · i insert · v visual · hjkl move · dd cc x u edit",
+			"⏎ send · i insert · v visual · hjkl move",
+			"⏎ send · i insert · v visual",
+			"⏎ send · i insert",
+		}
+	}
+	return []string{
+		"⏎ send · ⌃j⌃k chat · ⌥⏎ newline · / commands",
+		"⏎ send · ⌃j⌃k chat · / commands",
+		"⏎ send · / commands",
+	}
+}
+
+func fit(candidates []string, room int) string {
+	for _, candidate := range candidates {
+		if lipgloss.Width(candidate) <= room {
+			return candidate
+		}
+	}
+	if len(candidates) == 0 {
+		return ""
+	}
+	return clamp(candidates[len(candidates)-1], max(room, 0))
+}
+
+func (m *Model) status() string {
+	if m.quitArmed {
+		return quitChip.Render("⏻ quit?") + metaStyle.Render("  ")
+	}
+
+	var chips []string
+
+	if mode := m.agent.Gate.Mode(); m.agent.Gate != nil {
+		chips = append(chips, permissionChip(mode))
+	}
+	if m.vimEnabled() {
+		style := hintStyle
+		if m.vim.mode == modeNormal {
+			style = vimNormalChip
+		}
+		if m.inVisualMode() {
+			style = vimVisualChip
+		}
+		chips = append(chips, style.Render(m.modeName()))
+	}
+	if len(chips) == 0 {
+		return ""
+	}
+	return strings.Join(chips, metaStyle.Render(" ")) + metaStyle.Render("  ")
+}
+
+func permissionChip(mode permission.Mode) string {
+	switch mode {
+	case permission.AcceptEdits:
+		return acceptChip.Render("⏵⏵ accept edits")
+	case permission.Plan:
+		return planChip.Render("◇ plan")
+	case permission.Bypass:
+		return bypassChip.Render("⏵⏵ bypass")
+	}
+	return manualChip.Render("⏸ manual")
 }
 
 func clamp(s string, width int) string {
