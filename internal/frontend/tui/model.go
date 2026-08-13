@@ -291,9 +291,7 @@ func (m *Model) handleAppKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	case "shift+tab":
 		if gate := m.agent.Gate; gate != nil && gate.Policy != nil {
-			mode := gate.Mode().Next()
-			gate.Policy.SetMode(mode)
-			m.notice("permission → %s", mode)
+			gate.Policy.SetMode(gate.Mode().Next())
 		}
 		return m, nil
 

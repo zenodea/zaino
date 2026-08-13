@@ -48,10 +48,11 @@ func (m *Model) transcribe(msg llm.Message) {
 
 		case llm.ToolUseBlock:
 			m.entries = append(m.entries, entry{
-				kind:     entryTool,
-				toolName: b.Name,
-				toolArgs: compactArgs(b.Input, argsLimit),
-				done:     true,
+				kind:      entryTool,
+				toolName:  b.Name,
+				toolArgs:  compactArgs(b.Input, argsLimit),
+				toolInput: string(b.Input),
+				done:      true,
 			})
 
 		case llm.ToolResultBlock:
@@ -67,6 +68,7 @@ func (m *Model) closeRestoredTool(result llm.ToolResultBlock) {
 		}
 		m.entries[i].failed = result.IsError
 		m.entries[i].resultLen = len(result.Content)
+		m.entries[i].toolResult = result.Content
 		return
 	}
 }

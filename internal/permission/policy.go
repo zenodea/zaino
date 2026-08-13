@@ -42,6 +42,10 @@ func (p *Policy) Decide(req Request) (Verdict, string) {
 	if req.Action == Read {
 		return Allow, ""
 	}
+	// Reading a page changes nothing here, and planning is mostly reading.
+	if p.Mode == Plan && req.Action == Network {
+		return Allow, ""
+	}
 	if p.Mode == Plan {
 		return Deny, "plan mode is read only"
 	}

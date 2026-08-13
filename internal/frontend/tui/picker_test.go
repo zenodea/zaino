@@ -141,3 +141,44 @@ func TestWheelMovesThePicker(t *testing.T) {
 		t.Errorf("cursor = %d, want the wheel to have moved it to 2", m.picker.cursor)
 	}
 }
+
+// The list grows up from where the composer normally sits, so a short list is
+// next to the rule rather than stranded at the top of the screen.
+func TestPickerGrowsUpFromTheBottom(t *testing.T) {
+	m := pickerModel(t, 4)
+	m.resize(80, 24)
+	m.picker = picker{open: true, items: m.picker.items, cursor: 3}
+
+	lines := strings.Split(stripANSI(m.pickerView()), "\n")
+	if len(lines) != m.viewport.Height {
+		t.Fatalf("picker drew %d lines, want the full %d", len(lines), m.viewport.Height)
+	}
+	if strings.TrimSpace(lines[0]) != "" {
+		t.Errorf("first line is %q, want blank padding above a short list", lines[0])
+	}
+	if last := strings.TrimSpace(lines[len(lines)-1]); last == "" {
+		t.Error("the last line is blank; the list should end at the rule")
+	}
+}
+
+func TestPickerFillsTheHeightWhenFull(t *testing.T) {
+	m := pickerModel(t, 60)
+	m.resize(80, 24)
+
+	lines := strings.Split(stripANSI(m.pickerView()), "\n")
+	if len(lines) > m.viewport.Height {
+		t.Errorf("picker drew %d lines, more than the %d available", len(lines), m.viewport.Height)
+	}
+}
+
+func TestResumeIsQuiet(t *testing.T) {
+	m := pickerModel(t, 3)
+	before := len(m.entries)
+	m.resume(m.picker.items[0].ID)
+
+	for _, e := range m.entries[min(before, len(m.entries)):] {
+		if strings.Contains(e.text, "resumed") {
+			t.Errorf("resuming announced itself: %q", e.text)
+		}
+	}
+}

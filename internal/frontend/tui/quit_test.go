@@ -5,6 +5,8 @@ import (
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
+
+	"github.com/zenodea/zaino/internal/permission"
 )
 
 func quitModel(t *testing.T) *Model {
@@ -241,5 +243,24 @@ func TestViewportHeightTracksTheMenu(t *testing.T) {
 	}
 	if m.viewport.Height != tall {
 		t.Errorf("viewport is %d after the panel closed, want %d back", m.viewport.Height, tall)
+	}
+}
+
+// The footer already carries the mode; saying it again in the transcript is
+// noise that outlives the moment.
+func TestCyclingTheModeIsQuiet(t *testing.T) {
+	m := quitModel(t)
+	m.agent.Gate = &permission.Gate{Policy: permission.NewPolicy(permission.Manual)}
+	before := len(m.entries)
+
+	for range 4 {
+		m.Update(tea.KeyMsg{Type: tea.KeyShiftTab})
+	}
+
+	if len(m.entries) != before {
+		t.Errorf("cycling the mode added %d transcript entries", len(m.entries)-before)
+	}
+	if got := stripANSI(m.footer()); !strings.Contains(got, "manual") {
+		t.Errorf("footer = %q, want the mode still shown there", got)
 	}
 }

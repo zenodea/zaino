@@ -31,7 +31,8 @@ type Agent struct {
 	Tools []tool.Tool
 	Gate  *permission.Gate
 
-	MaxTurns int
+	MaxTurns  int
+	TaskTurns int
 
 	Hooks Hooks
 }

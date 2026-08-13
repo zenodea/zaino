@@ -144,7 +144,6 @@ func (m *Model) resume(id string) {
 	m.saveFailed = false
 
 	m.Restore(ctx)
-	m.notice("resumed %s · %d messages", id, len(ctx.Messages))
 	if stripped > 0 {
 		m.notice("dropped %d reasoning blocks that only %s can read back", stripped, ctx.Provider)
 	}
@@ -184,6 +183,10 @@ func (m *Model) pickerView() string {
 
 		lines = append(lines,
 			userMarker.Render(marker)+" "+style.Render(left+truncate(preview, room)))
+	}
+
+	if pad := m.viewport.Height - len(lines); pad > 0 {
+		lines = append(make([]string, pad), lines...)
 	}
 	return strings.Join(lines, "\n")
 }

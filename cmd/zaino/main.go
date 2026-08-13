@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"flag"
 	"fmt"
@@ -14,6 +15,7 @@ import (
 	"github.com/zenodea/zaino/internal/frontend/repl"
 	"github.com/zenodea/zaino/internal/frontend/tui"
 	"github.com/zenodea/zaino/internal/llm"
+	"github.com/zenodea/zaino/internal/mcp"
 	"github.com/zenodea/zaino/internal/permission"
 	"github.com/zenodea/zaino/internal/provider"
 	"github.com/zenodea/zaino/internal/store/recall"
@@ -49,6 +51,9 @@ func run() error {
 		toolNames    = flag.String("tools", "", "give the model only these tools (comma separated)")
 		excludeTools = flag.String("exclude-tools", "", "withhold these tools")
 		noTools      = flag.Bool("no-tools", false, "give the model no tools at all")
+		noTask       = flag.Bool("no-subagents", false, "withhold the task tool")
+		mcpConfig    = flag.String("mcp", "", "MCP servers to connect to (default: mcp.json beside the sessions)")
+		noMCP        = flag.Bool("no-mcp", false, "do not connect to any MCP server")
 
 		vimKeys = flag.Bool("vim", true, "modal editing in the composer; -vim=false for plain input")
 		mouse   = flag.Bool("mouse", false,
@@ -111,6 +116,13 @@ func run() error {
 		return err
 	}
 
+	servers, err := openMCP(*noMCP, *mcpConfig)
+	if err != nil {
+		return err
+	}
+	defer servers.Close()
+	tools = append(tools, servers.Tools...)
+
 	ag := &agent.Agent{
 		Provider:  backend,
 		Model:     *model,
@@ -120,6 +132,9 @@ func run() error {
 		Thinking:  &llm.Thinking{Enabled: true, Show: *showThink},
 		Tools:     tools,
 		Gate:      gate,
+	}
+	if !*noTools && !*noTask {
+		ag.Tools = append(ag.Tools, agent.TaskTool(ag))
 	}
 	applyRestored(ag, restored, given)
 
@@ -203,6 +218,35 @@ func openToolbox(mode string, allowOutside, noTools bool, allow, deny string) (*
 		return nil, nil, err
 	}
 	return gate, tools, nil
+}
+
+// A server that will not start is worth saying so about, but not worth
+// refusing to run over.
+func openMCP(off bool, configPath string) (*mcp.Session, error) {
+	if off {
+		return nil, nil
+	}
+	if configPath == "" {
+		path, err := mcp.ConfigPath()
+		if err != nil {
+			return nil, nil
+		}
+		configPath = path
+	}
+
+	cfg, err := mcp.Load(configPath)
+	if err != nil {
+		return nil, err
+	}
+	if len(cfg.Servers) == 0 {
+		return nil, nil
+	}
+
+	session, failures := mcp.Connect(context.Background(), cfg)
+	for _, failure := range failures {
+		fmt.Fprintln(os.Stderr, "zaino: mcp:", failure)
+	}
+	return session, nil
 }
 
 func commaList(s string) []string {

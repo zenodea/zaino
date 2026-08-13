@@ -1,6 +1,8 @@
 package tui
 
 import (
+	"encoding/json"
+	"strings"
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -256,4 +258,46 @@ func TestNothingIsRecordedWithoutAStore(t *testing.T) {
 	if m.saveFailed {
 		t.Error("not saving should not be reported as a failure to save")
 	}
+}
+
+func TestRestoredToolCallsCanStillBeOpened(t *testing.T) {
+	m := newTestModel(t, 90, 24)
+	m.ready = true
+
+	call := llm.ToolUseBlock{ID: "t1", Name: "grep",
+		Input: json.RawMessage(`{"path":"internal","pattern":"panic"}`)}
+	m.Restore(session.Context{Messages: []llm.Message{
+		{Role: llm.RoleAssistant, Content: llm.Content{call}},
+		{Role: llm.RoleUser, Content: llm.Content{
+			llm.ToolResultBlock{ToolUseID: "t1", Content: "agent.go:42:\tpanic(err)\n"}}},
+	}})
+
+	e, ok := lastTool(m)
+	if !ok {
+		t.Fatal("no tool entry was restored")
+	}
+	if e.toolInput == "" {
+		t.Error("restored tool call lost its arguments")
+	}
+	if e.toolResult == "" {
+		t.Error("restored tool call lost its result")
+	}
+
+	if line := stripANSI(e.toolLine(70)); strings.Contains(line, `{"`) {
+		t.Errorf("restored line shows raw JSON instead of a summary: %q", line)
+	}
+
+	e.expanded = true
+	if detail := stripANSI(e.detail(70)); strings.Contains(detail, "nothing to show") {
+		t.Errorf("restored tool call has nothing to expand:\n%s", detail)
+	}
+}
+
+func lastTool(m *Model) (entry, bool) {
+	for i := len(m.entries) - 1; i >= 0; i-- {
+		if m.entries[i].kind == entryTool {
+			return m.entries[i], true
+		}
+	}
+	return entry{}, false
 }

@@ -23,7 +23,7 @@ type Call interface {
 
 func All(w *Workspace) []Tool {
 	return []Tool{
-		&Read{w}, &Write{w}, &Edit{w}, &Ls{w}, &Find{w}, &Grep{w}, &Bash{w},
+		&Read{w}, &Write{w}, &Edit{w}, &Ls{w}, &Find{w}, &Grep{w}, &Bash{w}, &Fetch{},
 	}
 }
 

@@ -11,6 +11,7 @@ const (
 	Read    Action = "read"
 	Write   Action = "write"
 	Execute Action = "execute"
+	Network Action = "network"
 )
 
 type Request struct {

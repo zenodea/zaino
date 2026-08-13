@@ -548,3 +548,91 @@ func TestAllToolsHaveSchemas(t *testing.T) {
 		}
 	}
 }
+
+func TestEditAppliesSeveralEditsInOneCall(t *testing.T) {
+	w := workspace(t)
+	write(t, w, "a.go", "one\ntwo\nthree\n")
+	mustRun(t, &Read{w}, readArgs{Path: "a.go"})
+
+	out, err := run(t, &Edit{w}, editArgs{Path: "a.go", Edits: []editStep{
+		{OldText: "one", NewText: "ONE"},
+		{OldText: "three", NewText: "THREE"},
+	}})
+	if err != nil {
+		t.Fatalf("edit: %v", err)
+	}
+	if got := read(t, w, "a.go"); got != "ONE\ntwo\nTHREE\n" {
+		t.Errorf("file = %q", got)
+	}
+	if !strings.Contains(out, "2 edits") {
+		t.Errorf("out = %q, want it to say how many edits landed", out)
+	}
+}
+
+// Each step sees the result of the last, so a later edit can touch what an
+// earlier one wrote.
+func TestEditsSeeEachOther(t *testing.T) {
+	w := workspace(t)
+	write(t, w, "a.go", "alpha\n")
+	mustRun(t, &Read{w}, readArgs{Path: "a.go"})
+
+	if _, err := run(t, &Edit{w}, editArgs{Path: "a.go", Edits: []editStep{
+		{OldText: "alpha", NewText: "beta"},
+		{OldText: "beta", NewText: "gamma"},
+	}}); err != nil {
+		t.Fatalf("edit: %v", err)
+	}
+	if got := read(t, w, "a.go"); got != "gamma\n" {
+		t.Errorf("file = %q, want the second edit to have seen the first", got)
+	}
+}
+
+// A batch that failed part way through would leave the file in a state nobody
+// asked for, so nothing is written unless everything matches.
+func TestAFailedEditInABatchWritesNothing(t *testing.T) {
+	w := workspace(t)
+	write(t, w, "a.go", "one\ntwo\n")
+	mustRun(t, &Read{w}, readArgs{Path: "a.go"})
+
+	_, err := run(t, &Edit{w}, editArgs{Path: "a.go", Edits: []editStep{
+		{OldText: "one", NewText: "ONE"},
+		{OldText: "nowhere", NewText: "x"},
+	}})
+	if err == nil || !strings.Contains(err.Error(), "edit 2 of 2") {
+		t.Fatalf("err = %v, want it to name the step that failed", err)
+	}
+	if got := read(t, w, "a.go"); got != "one\ntwo\n" {
+		t.Errorf("file = %q, want it untouched", got)
+	}
+}
+
+func TestSingleEditStillWorks(t *testing.T) {
+	w := workspace(t)
+	write(t, w, "a.go", "hello\n")
+	mustRun(t, &Read{w}, readArgs{Path: "a.go"})
+
+	if _, err := run(t, &Edit{w}, editArgs{Path: "a.go", OldText: "hello", NewText: "goodbye"}); err != nil {
+		t.Fatalf("edit: %v", err)
+	}
+	if got := read(t, w, "a.go"); got != "goodbye\n" {
+		t.Errorf("file = %q", got)
+	}
+}
+
+func TestBatchAsksOnceWithOneDiff(t *testing.T) {
+	w := workspace(t)
+	write(t, w, "a.go", "one\ntwo\nthree\n")
+	mustRun(t, &Read{w}, readArgs{Path: "a.go"})
+
+	call, err := prepare(t, &Edit{w}, editArgs{Path: "a.go", Edits: []editStep{
+		{OldText: "one", NewText: "ONE"},
+		{OldText: "three", NewText: "THREE"},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := call.Request()
+	if !strings.Contains(req.Preview, "ONE") || !strings.Contains(req.Preview, "THREE") {
+		t.Errorf("preview shows only part of the batch:\n%s", req.Preview)
+	}
+}

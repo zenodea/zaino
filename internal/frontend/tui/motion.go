@@ -21,7 +21,7 @@ type motion struct {
 	trail   map[int]int
 }
 
-const framesPerShade = 3
+const framesPerShade = 5
 
 func trailLife() int { return len(trail) * framesPerShade }
 

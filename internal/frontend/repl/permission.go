@@ -70,6 +70,8 @@ func verb(action permission.Action) string {
 		return "Write"
 	case permission.Execute:
 		return "Run"
+	case permission.Network:
+		return "Fetch"
 	}
 	return "Read"
 }

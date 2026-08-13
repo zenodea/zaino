@@ -1,4 +1,3 @@
-random
 # Zaino
 
 An agent harness in Go, with hand-rolled provider clients and a terminal UI.
@@ -8,8 +7,9 @@ An agent harness in Go, with hand-rolled provider clients and a terminal UI.
     internal/llm/                Provider-neutral model: messages, content
                                  blocks, streaming events, and the accumulator
     internal/agent/              The turn loop: stream → run tools → repeat
-    internal/tool/               read, write, edit, bash, grep, find, ls
+    internal/tool/               read, write, edit, bash, grep, find, ls, fetch
     internal/permission/         Who is allowed to do what, and who to ask
+    internal/mcp/                MCP servers, spoken over stdio
 
     internal/provider/           Name → provider, with credential auto-detect
     internal/provider/anthropic/ Claude provider (Messages API)
@@ -46,7 +46,8 @@ implementing `llm.Provider` and nothing else.
 Flags: `-provider`, `-model`, `-max-tokens`, `-effort` (Anthropic only),
 `-system`, `-thinking`, `-plain`, `-v`, `-continue`/`-c`, `-resume`/`-r`,
 `-no-save`, `-log`, `-permission`, `-allow-outside`, `-tools`,
-`-exclude-tools`, `-no-tools`, `-vim`, `-mouse`, `-animate`.
+`-exclude-tools`, `-no-tools`, `-no-subagents`, `-mcp`, `-no-mcp`, `-vim`,
+`-mouse`, `-animate`.
 
 Keys: `⏎` send, `⌥⏎` newline, `⌃j`/`⌃k` walk the chat, `↑`/`↓` earlier prompts,
 `⇧⇥` cycle permission mode, `PgUp`/`PgDn` and `⌃u`/`⌃d` scroll.
@@ -76,15 +77,12 @@ The footer carries the permission mode at all times — `⏸ manual`,
 `⏵⏵ accept edits`, `◇ plan`, `⏵⏵ bypass` — next to the editing mode. When the
 line is too narrow for everything, the key hints shorten and the modes stay.
 
-The wheel scrolls the transcript, and the session picker. That needs zaino to
-grab the mouse, which takes text selection away from the terminal — hold
-`⇧` (or `⌥` on macOS) while dragging to select anyway, as in any other
-full-screen terminal program.
+The mouse belongs to the terminal, so selecting and copying works as it does
+anywhere else. Scrolling is on the keyboard instead: `⌃j`/`⌃k`, `PgUp`/`PgDn`,
+and `⌃u`/`⌃f`/`⌃b`.
 
-If you would rather have plain selection back, `-mouse=false` hands the mouse
-to the terminal. Be aware of what that costs: in the alternate screen most
-terminals turn the wheel into `↑`/`↓`, which lands on prompt recall rather than
-scrolling. `PgUp`/`PgDn` still move the transcript either way.
+`-mouse` gives the wheel to zaino if you would rather scroll with it. That
+grabs the mouse, so selecting then needs `⇧`-drag (or `⌥`-drag on macOS).
 
 What the model writes is rendered as markdown — bold, italics, inline code,
 headings, lists, quotes and fenced code blocks. Your own prompts are shown as
@@ -149,9 +147,19 @@ piping works:
 
 ## Tools
 
-Seven of them: `read`, `write`, `edit`, `bash`, `grep`, `find`, `ls`. Pick a
-subset with `-tools read,grep`, withhold one with `-exclude-tools bash`, or
-turn the lot off with `-no-tools`. `/tools` lists what the model has.
+Eight of them: `read`, `write`, `edit`, `bash`, `grep`, `find`, `ls`, `fetch`,
+plus `task` for handing work to a second agent. Pick a subset with
+`-tools read,grep`, withhold one with `-exclude-tools bash`, or turn the lot
+off with `-no-tools`. `/tools` lists what the model has.
+
+`edit` takes an `edits` array to make several changes to one file in a single
+call. They are applied in order, each seeing the result of the last, and if any
+one of them fails to match then none of them are written — a batch that stopped
+half way through would leave the file in a state nobody asked for.
+
+`fetch` gets a URL and returns it as text, with the markup stripped from HTML.
+It is the tool that lets the model check what an API actually documents rather
+than what it remembers.
 
 Two rules keep `edit` and `write` honest, and they are about correctness rather
 than permission:
@@ -166,13 +174,43 @@ than permission:
 If a file changes on disk between an edit being worked out and being allowed,
 the write is refused rather than clobbering the other writer.
 
+## Subagents
+
+`task` runs a second agent with its own conversation and hands back only what
+it concluded. A search that reads twenty files costs this conversation one
+paragraph instead of twenty file contents, which is what keeps a long session
+inside the window.
+
+The child inherits the parent's gate, so a subagent is not a way around a
+refusal: it asks with the same policy and the same approver. It cannot ask you
+anything itself, so the prompt has to carry everything it needs. Nesting stops
+two deep, and `-no-subagents` withholds it.
+
+## MCP
+
+Servers are declared in `mcp.json` beside the sessions, or wherever `-mcp`
+points:
+
+    {
+      "servers": {
+        "docs": {"command": "npx", "args": ["-y", "@some/mcp-server"]},
+        "db":   {"command": "./bin/db-mcp", "env": {"DSN": "..."}}
+      }
+    }
+
+Each server is spawned on stdio, asked what it can do, and its tools appear
+named `server__tool` so two servers offering `search` stay apart. A server that
+will not start is reported and skipped rather than taken as fatal. Nothing is
+known about what a server does, so its tools ask for approval like anything
+else that leaves the process. `-no-mcp` skips the lot.
+
 ## Permission
 
 What the model may do without asking is a mode, and `⇧⇥` cycles it:
 
-    manual         ask before writing or running anything    (the default)
-    accept-edits   edits go through, ask before running anything
-    plan           read only, nothing is written or run
+    manual         ask before writing, running or fetching   (the default)
+    accept-edits   edits go through, ask before running or fetching
+    plan           read only — nothing is written or run, but pages can be read
     bypass         everything goes through unasked
 
 Set it with `-permission accept-edits` or `/permission plan`. Reading is never
@@ -195,10 +233,11 @@ anything that would prompt is refused. Use `-permission accept-edits` or
 ## Status
 
 Streaming, the turn loop, tools, permissions, both providers, and the UI are
-implemented and tested — 220 tests, including the same tool round-trip driven
+implemented and tested — 252 tests, including the same tool round-trip driven
 through each provider to prove the loop is provider-agnostic.
 
-Not built: MCP, subagents, context compaction.
+Not built: context compaction — the next thing that matters, and cheap given
+the session log: a `summary` entry that `Build` stops at.
 
 ## History
 
