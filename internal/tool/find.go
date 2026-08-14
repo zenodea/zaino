@@ -20,6 +20,8 @@ type findArgs struct {
 	Path    string `json:"path,omitempty"`
 }
 
+func (f *Find) Action() permission.Action { return permission.Read }
+
 func (f *Find) Definition() llm.Tool {
 	return llm.Tool{
 		Name: "find",

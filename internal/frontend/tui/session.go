@@ -73,6 +73,12 @@ func (m *Model) closeRestoredTool(result llm.ToolResultBlock) {
 	}
 }
 
+func (m *Model) compacted(msg compactMsg) {
+	m.messages = msg.Kept
+	m.saveError(m.rec.Compact(msg.Summary, msg.Kept))
+	m.notice("compacted · %d messages kept", max(len(msg.Kept)-1, 0))
+}
+
 func (m *Model) record(n session.New) {
 	m.saveError(m.rec.Append(n))
 }

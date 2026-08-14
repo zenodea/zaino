@@ -35,6 +35,8 @@ func (a editArgs) steps() []editStep {
 	return []editStep{{OldText: a.OldText, NewText: a.NewText, ReplaceAll: a.ReplaceAll}}
 }
 
+func (e *Edit) Action() permission.Action { return permission.Write }
+
 func (e *Edit) Definition() llm.Tool {
 	return llm.Tool{
 		Name: "edit",

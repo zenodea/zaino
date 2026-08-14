@@ -17,6 +17,7 @@ type Hooks struct {
 	OnToolCall      func(call llm.ToolUseBlock)
 	OnToolResult    func(call llm.ToolUseBlock, result string, isError bool)
 	OnTurn          func(resp *llm.Response)
+	OnCompact       func(summary string, kept []llm.Message)
 }
 
 type Agent struct {
@@ -28,13 +29,18 @@ type Agent struct {
 	Effort    string
 	Thinking  *llm.Thinking
 
-	Tools []tool.Tool
-	Gate  *permission.Gate
+	Tools      []tool.Tool
+	Gate       *permission.Gate
+	Compaction *Compaction
 
 	MaxTurns  int
 	TaskTurns int
 
 	Hooks Hooks
+
+	// What the provider counted for the last turn, so the next one knows how
+	// close to the window it is.
+	used int
 }
 
 const (
@@ -57,6 +63,16 @@ func (e *RefusalError) Error() string {
 	return fmt.Sprintf("agent: request refused (%s): %s", e.Details.Category, e.Details.Explanation)
 }
 
+// What the provider counted for the last turn, and how much it may hold.
+func (a *Agent) Used() int { return a.used }
+
+func (a *Agent) Window() int {
+	if a.Compaction == nil {
+		return 0
+	}
+	return a.Compaction.window()
+}
+
 func (a *Agent) Run(ctx context.Context, history []llm.Message) ([]llm.Message, error) {
 	maxTurns := a.MaxTurns
 	if maxTurns <= 0 {
@@ -64,11 +80,20 @@ func (a *Agent) Run(ctx context.Context, history []llm.Message) ([]llm.Message, 
 	}
 
 	for turn := 0; turn < maxTurns; turn++ {
+		if a.shouldCompact(history) {
+			compacted, err := a.compact(ctx, history)
+			if err != nil {
+				return history, err
+			}
+			history = compacted
+		}
+
 		resp, err := a.turn(ctx, history)
 		if err != nil {
 			return history, err
 		}
 		history = append(history, resp.ToMessage())
+		a.used = resp.Usage.InputTokens + resp.Usage.OutputTokens
 
 		if a.Hooks.OnTurn != nil {
 			a.Hooks.OnTurn(resp)

@@ -14,11 +14,22 @@ const (
 )
 
 type motion struct {
-	on      bool
-	active  bool
-	target  int
-	landing int
-	trail   map[int]int
+	on        bool
+	active    bool
+	scrolling bool
+	target    int
+	landing   int
+	trail     map[int]int
+}
+
+// Starts the frame loop if it is not already running. Everything that animates
+// shares one tick, so two things moving at once do not run at double rate.
+func (m *Model) animate() tea.Cmd {
+	if !m.motion.on || m.motion.active {
+		return nil
+	}
+	m.motion.active = true
+	return frame()
 }
 
 const framesPerShade = 5
@@ -65,8 +76,9 @@ func (m *Model) leaveTrail(from int) {
 }
 
 func (m *Model) step() tea.Cmd {
-	repaint := make([]int, 0, len(m.motion.trail)+1)
+	working := m.fillMeter()
 
+	repaint := make([]int, 0, len(m.motion.trail)+1)
 	if m.motion.landing > 0 {
 		m.motion.landing--
 		repaint = append(repaint, m.cursor)
@@ -80,17 +92,23 @@ func (m *Model) step() tea.Cmd {
 	}
 	m.paint(repaint...)
 
-	distance := m.motion.target - m.viewport.YOffset
-	switch {
-	case distance == 0:
-	case distance > 0:
-		m.viewport.SetYOffset(m.viewport.YOffset + max(distance*2/3, 1))
-	default:
-		m.viewport.SetYOffset(m.viewport.YOffset + min(distance*2/3, -1))
+	// The viewport is only touched while a scroll is actually in flight;
+	// otherwise something else animating would drag the transcript with it.
+	if m.motion.scrolling {
+		distance := m.motion.target - m.viewport.YOffset
+		switch {
+		case distance > 0:
+			m.viewport.SetYOffset(m.viewport.YOffset + max(distance*2/3, 1))
+		case distance < 0:
+			m.viewport.SetYOffset(m.viewport.YOffset + min(distance*2/3, -1))
+		}
+		m.motion.scrolling = m.viewport.YOffset != m.motion.target
 	}
 
-	arrived := m.viewport.YOffset == m.motion.target
-	if arrived && m.motion.landing == 0 && len(m.motion.trail) == 0 {
+	if m.motion.scrolling || m.motion.landing > 0 || len(m.motion.trail) > 0 {
+		working = true
+	}
+	if !working {
 		m.motion.active = false
 		return nil
 	}

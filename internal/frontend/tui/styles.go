@@ -182,3 +182,59 @@ func trailBar(life int) string {
 func cursorBar() string { return selectedBar.Render("▌") }
 func landedBar() string { return landingBar.Render("▌") }
 func noBar() string     { return " " }
+
+// An ordered choice reads better as a rising ramp than as a word. Cells climb
+// as the level does, and what is not reached stays a dot.
+const meterWidth = 5
+
+var ramp = []string{"▁", "▃", "▄", "▆", "█"}
+
+var meterHeat = []lipgloss.Style{
+	lipgloss.NewStyle().Foreground(muted),
+	lipgloss.NewStyle().Foreground(speech),
+	lipgloss.NewStyle().Foreground(accent),
+	lipgloss.NewStyle().Foreground(packDeep),
+	lipgloss.NewStyle().Foreground(danger),
+}
+
+func meterBar(level, filled int) string {
+	heat := meterHeat[min(max(level-1, 0), len(meterHeat)-1)]
+
+	var b strings.Builder
+	for i := range meterWidth {
+		if i < filled && i < len(ramp) {
+			b.WriteString(heat.Render(ramp[i]))
+			continue
+		}
+		b.WriteString(gutterStyle.Render("·"))
+	}
+	return b.String()
+}
+
+var stateStyles = map[int]struct {
+	mark  string
+	style lipgloss.Style
+}{
+	stateRefuse: {"✕", lipgloss.NewStyle().Foreground(danger)},
+	stateAsk:    {"?", lipgloss.NewStyle().Foreground(accent)},
+	stateAllow:  {"●", lipgloss.NewStyle().Foreground(speech)},
+}
+
+func stateMark(state int) string {
+	s, ok := stateStyles[state]
+	if !ok {
+		return " "
+	}
+	return s.style.Render(s.mark)
+}
+
+func scaleCell(level int, lit bool) string {
+	glyph := "·"
+	if level > 0 && level-1 < len(ramp) {
+		glyph = ramp[level-1]
+	}
+	if !lit {
+		return gutterStyle.Render(glyph)
+	}
+	return meterHeat[min(max(level-1, 0), len(meterHeat)-1)].Render(glyph)
+}

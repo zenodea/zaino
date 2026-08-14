@@ -26,6 +26,8 @@ type remote struct {
 	def    Definition
 }
 
+func (r *remote) Action() permission.Action { return permission.Execute }
+
 func (r *remote) Definition() llm.Tool {
 	schema := r.def.InputSchema
 	if schema == nil {

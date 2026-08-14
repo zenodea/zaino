@@ -25,6 +25,8 @@ const (
 	maxTimeout     = 10 * time.Minute
 )
 
+func (b *Bash) Action() permission.Action { return permission.Execute }
+
 func (b *Bash) Definition() llm.Tool {
 	return llm.Tool{
 		Name: "bash",

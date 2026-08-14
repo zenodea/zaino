@@ -30,6 +30,8 @@ const (
 	maxRedirects  = 5
 )
 
+func (f *Fetch) Action() permission.Action { return permission.Network }
+
 func (f *Fetch) Definition() llm.Tool {
 	return llm.Tool{
 		Name: "fetch",

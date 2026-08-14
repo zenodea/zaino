@@ -90,10 +90,7 @@ func (m *Model) showCursor() tea.Cmd {
 	}
 
 	m.motion.target = target
+	m.motion.scrolling = target != m.viewport.YOffset
 	m.motion.landing = landingFrames
-	if m.motion.active {
-		return nil
-	}
-	m.motion.active = true
-	return frame()
+	return m.animate()
 }

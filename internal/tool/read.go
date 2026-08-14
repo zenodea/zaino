@@ -20,6 +20,8 @@ type readArgs struct {
 	Limit  int    `json:"limit,omitempty"`
 }
 
+func (r *Read) Action() permission.Action { return permission.Read }
+
 func (r *Read) Definition() llm.Tool {
 	return llm.Tool{
 		Name: "read",

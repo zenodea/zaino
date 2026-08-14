@@ -1,18 +1,21 @@
 package tui
 
 import (
+	"context"
 	"fmt"
 	"sort"
-	"strconv"
 	"strings"
+	"time"
 	"unicode"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 
 	"github.com/zenodea/zaino/internal/llm"
 	"github.com/zenodea/zaino/internal/permission"
 	"github.com/zenodea/zaino/internal/provider"
 	"github.com/zenodea/zaino/internal/store/session"
+	"github.com/zenodea/zaino/internal/tool"
 )
 
 type command struct {
@@ -85,6 +88,11 @@ func commandList() []command {
 			arg:     "[on|off]",
 			summary: "modal editing in the composer",
 			run:     cmdVim,
+		},
+		{
+			name:    "compact",
+			summary: "fold the conversation so far into a summary",
+			run:     cmdCompact,
 		},
 		{
 			name:    "usage",
@@ -229,33 +237,96 @@ func cmdHelp(m *Model, _ string) tea.Cmd {
 		if c.arg != "" {
 			labels[i] += " " + c.arg
 		}
-		width = max(width, len(labels[i]))
+		width = max(width, lipgloss.Width(labels[i]))
 	}
 
-	lines := make([]string, 0, len(all)+1)
+	lines := make([]string, 0, len(all)+8)
 	for i, c := range all {
-		line := labels[i] + strings.Repeat(" ", width-len(labels[i])+2) + c.summary
+		row := menuPickStyle.Render(pad(labels[i], width+2)) + bodyStyle.Render(c.summary)
 		if len(c.aliases) > 0 {
-			line += "  (/" + strings.Join(c.aliases, ", /") + ")"
+			row += hintStyle.Render("  (/" + strings.Join(c.aliases, ", /") + ")")
 		}
-		lines = append(lines, line)
+		lines = append(lines, row)
 	}
-	m.notice("%s", strings.Join(lines, "\n"))
-	return nil
+
+	lines = append(lines, "", metaStyle.Render("keys"), "")
+	for _, k := range [][2]string{
+		{"⏎", "send · open a tool call under the bar"},
+		{"⌥⏎", "newline"},
+		{"⌃j ⌃k", "walk the transcript"},
+		{"↑ ↓", "earlier prompts"},
+		{"⇧⇥", "cycle the permission mode"},
+		{"esc", "stop the turn, once vim is done with it"},
+		{"⌃c", "stop the turn · twice to leave"},
+	} {
+		lines = append(lines, keyCapStyle.Render(pad(k[0], width+2))+hintStyle.Render(k[1]))
+	}
+	return m.show("commands", lines)
 }
 
-func cmdClear(m *Model, _ string) tea.Cmd {
-	m.reset()
-	return nil
+func cmdClear(m *Model, arg string) tea.Cmd {
+	if len(m.messages) == 0 {
+		m.notice("nothing to forget")
+		return nil
+	}
+	if arg == "!" {
+		m.reset()
+		return nil
+	}
+
+	return m.ask(chooser{title: "clear · start the conversation over", current: "keep",
+		options: []choice{
+			{label: "keep it", value: "keep", detail: "leave everything as it is", body: []string{
+				hintStyle.Render("Nothing happens."),
+			}},
+			{label: "clear", value: "clear", detail: whatGoes(m), body: []string{
+				keyed("messages", fmt.Sprintf("%d leave the context", len(m.messages))),
+				keyed("tokens", humanTokens(m.sessionUsage.InputTokens+m.sessionUsage.OutputTokens)+" spent so far"),
+				"",
+				hintStyle.Render("The transcript stays readable and the session file keeps every line."),
+				hintStyle.Render("A clear marks where the context starts, it does not delete anything."),
+			}},
+		},
+		apply: func(m *Model, picked choice) {
+			if picked.value == "clear" {
+				m.reset()
+			}
+		}})
+}
+
+func whatGoes(m *Model) string {
+	return fmt.Sprintf("%d messages stop being sent", len(m.messages))
 }
 
 func cmdModel(m *Model, arg string) tea.Cmd {
 	if arg == "" {
-		m.notice("model: %s", m.modelName())
-		if known := m.knownModels(); len(known) > 0 {
-			m.notice("known: %s", strings.Join(known, ", "))
+		known := m.knownModels()
+		if len(known) == 0 {
+			m.notice("model: %s\n%s does not list its models — pass one to /model",
+				m.modelName(), m.provider)
+			return nil
 		}
-		return nil
+
+		options := []choice{{
+			label: "provider default", value: "",
+			detail: m.agent.Provider.DefaultModel(),
+			body:   []string{hintStyle.Render("Whatever " + m.provider + " picks for itself, which follows their default")},
+		}}
+		for _, id := range known {
+			options = append(options, choice{label: id, value: id, body: []string{
+				keyed("provider", m.provider),
+				keyed("effort", orDefault(m.agent.Effort, "provider default")),
+				"",
+				hintStyle.Render("Changing model keeps the conversation; only what answers it changes."),
+			}})
+		}
+		return m.ask(chooser{title: "model · " + m.provider, options: options, current: m.agent.Model,
+			apply: func(m *Model, picked choice) {
+				m.agent.Model = picked.value
+				m.lastModel = ""
+				m.record(session.Model(m.provider, picked.value))
+				m.notice("model → %s", m.modelName())
+			}})
 	}
 	m.agent.Model = arg
 	m.lastModel = "" // the header prefers what the last turn reported
@@ -266,9 +337,24 @@ func cmdModel(m *Model, arg string) tea.Cmd {
 
 func cmdProvider(m *Model, arg string) tea.Cmd {
 	if arg == "" {
-		m.notice("provider: %s (available: %s)",
-			m.provider, strings.Join(provider.Available(), ", "))
-		return nil
+		var options []choice
+		for _, name := range provider.Available() {
+			detail, body := "credentials found", []string{
+				hintStyle.Render("Switching clears the context. A model id, thinking signatures"),
+				hintStyle.Render("and tool ids mean nothing on the other side."),
+			}
+			if name == m.provider {
+				detail, body = "in use", []string{
+					keyed("model", m.modelName()),
+					keyed("messages", fmt.Sprintf("%d in context", len(m.messages))),
+					"",
+					hintStyle.Render("Already here. Choosing it again changes nothing."),
+				}
+			}
+			options = append(options, choice{label: name, detail: detail, value: name, body: body})
+		}
+		return m.ask(chooser{title: "provider", options: options, current: m.provider,
+			apply: func(m *Model, picked choice) { cmdProvider(m, picked.value) }})
 	}
 
 	backend, err := provider.New(arg)
@@ -292,16 +378,34 @@ func cmdProvider(m *Model, arg string) tea.Cmd {
 	return nil
 }
 
+var effortDetail = map[string]string{
+	llm.EffortLow:    "answers fastest, thinks least",
+	llm.EffortMedium: "a working balance",
+	llm.EffortHigh:   "thinks before answering",
+	llm.EffortXHigh:  "takes its time on hard things",
+	llm.EffortMax:    "slowest, and the most thorough",
+}
+
 var efforts = []string{llm.EffortLow, llm.EffortMedium, llm.EffortHigh, llm.EffortXHigh, llm.EffortMax}
 
 func cmdEffort(m *Model, arg string) tea.Cmd {
 	if arg == "" {
-		current := m.agent.Effort
-		if current == "" {
-			current = "(provider default)"
+		options := []choice{{label: "default", detail: "whatever the provider does on its own", value: ""}}
+		for i, level := range efforts {
+			options = append(options, choice{
+				label: level, value: level, level: i + 1, detail: effortDetail[level],
+			})
 		}
-		m.notice("effort: %s (%s)", current, strings.Join(efforts, ", "))
-		return nil
+		if m.provider != "anthropic" {
+			options[0].detail = m.provider + " ignores effort"
+		}
+		return m.ask(chooser{title: "effort · how hard the model works before answering",
+			layout: layoutScale, options: options, current: m.agent.Effort,
+			apply: func(m *Model, picked choice) {
+				m.agent.Effort = picked.value
+				m.record(session.Effort(picked.value))
+				m.notice("effort → %s", orDefault(picked.value, "provider default"))
+			}})
 	}
 
 	arg = strings.ToLower(arg)
@@ -335,7 +439,26 @@ func cmdThinking(m *Model, arg string) tea.Cmd {
 
 	switch strings.ToLower(arg) {
 	case "":
-		m.notice("thinking: %s", onOff(t.Show))
+		return m.ask(chooser{title: "thinking · whether the model shows its working",
+			current: onOff(t.Show), options: []choice{
+				{label: "shown", value: "shown", detail: "reasoning is printed as it arrives", body: []string{
+					thinkingMarker.Render("⋯ ") + thinkingStyle.Render("the loop calls runTools once per turn, so the gate has to"),
+					thinkingMarker.Render("  ") + thinkingStyle.Render("sit inside it rather than around it"),
+					"",
+					bodyStyle.Render("The gate belongs inside the loop."),
+					"",
+					hintStyle.Render("You see what it considered, which is worth having when it is wrong."),
+					hintStyle.Render("It is requested either way, so this costs no tokens to turn on."),
+				}},
+				{label: "hidden", value: "hidden", detail: "requested, but kept off screen", body: []string{
+					bodyStyle.Render("The gate belongs inside the loop."),
+					"",
+					hintStyle.Render("Only the answer. The reasoning is still asked for and still"),
+					hintStyle.Render("billed — this changes what reaches the screen, nothing else."),
+				}},
+			}, apply: func(m *Model, picked choice) {
+				cmdThinking(m, map[string]string{"shown": "on", "hidden": "off"}[picked.value])
+			}})
 	case "on", "show", "true":
 		t.Show = true
 		m.record(session.Thinking(true))
@@ -352,22 +475,30 @@ func cmdThinking(m *Model, arg string) tea.Cmd {
 
 func cmdSystem(m *Model, arg string) tea.Cmd {
 	switch {
-	case arg == "":
-		if m.agent.System == "" {
-			m.notice("system: (none)")
-			return nil
-		}
-		m.notice("system: %s", m.agent.System)
 	case arg == "-":
 		m.agent.System = ""
 		m.record(session.System(""))
 		m.notice("system prompt dropped")
-	default:
+		return nil
+
+	case arg != "":
 		m.agent.System = arg
 		m.record(session.System(arg))
-		m.notice("system prompt set (%d chars)", len(arg))
+		m.notice("system prompt set (%d characters)", len(arg))
+		return nil
 	}
-	return nil
+
+	if strings.TrimSpace(m.agent.System) == "" {
+		return m.show("system prompt", []string{
+			hintStyle.Render("none — the model is running on its own instructions"),
+			"",
+			hintStyle.Render("/system <text>  set one"),
+		})
+	}
+
+	lines := renderMarkdown(m.agent.System, max(m.contentWidth()-2, 30), bodyStyle)
+	return m.show(fmt.Sprintf("system prompt · %d characters", len(m.agent.System)),
+		append(strings.Split(lines, "\n"), "", hintStyle.Render("/system <text> replaces it · /system - drops it")))
 }
 
 func cmdPermission(m *Model, arg string) tea.Cmd {
@@ -378,11 +509,24 @@ func cmdPermission(m *Model, arg string) tea.Cmd {
 	}
 
 	if arg == "" {
-		m.notice("permission: %s — %s", gate.Mode(), gate.Mode().Describe())
-		if granted := gate.Policy.Granted(); len(granted) > 0 {
-			m.notice("allowed for this session: %s", strings.Join(granted, ", "))
+		var options []choice
+		for _, name := range permission.ModeNames() {
+			mode := permission.Mode(name)
+			options = append(options, choice{
+				label: name, detail: mode.Describe(), value: name, grid: capabilities(mode),
+			})
 		}
-		return nil
+		return m.ask(chooser{title: "permission · what the agent may do without stopping to ask",
+			layout: layoutBoard, options: options, current: string(gate.Mode()),
+			apply: func(m *Model, picked choice) {
+				mode, err := permission.ParseMode(picked.value)
+				if err != nil {
+					m.push(entry{kind: entryError, text: err.Error()})
+					return
+				}
+				gate.Policy.SetMode(mode)
+				m.notice("permission → %s", mode)
+			}})
 	}
 
 	mode, err := permission.ParseMode(arg)
@@ -400,13 +544,40 @@ func cmdTools(m *Model, _ string) tea.Cmd {
 		m.notice("no tools — the model can only talk")
 		return nil
 	}
-	lines := []string{fmt.Sprintf("tools · %s", m.agent.Gate.Mode())}
+
+	width := 0
+	for _, t := range m.agent.Tools {
+		width = max(width, lipgloss.Width(t.Definition().Name))
+	}
+
+	lines := []string{
+		hintStyle.Render("● goes through   ? stops to ask   ✕ refused") +
+			metaStyle.Render("   under "+string(m.agent.Gate.Mode())),
+		"",
+	}
 	for _, t := range m.agent.Tools {
 		def := t.Definition()
-		lines = append(lines, fmt.Sprintf("  %-6s %s", def.Name, firstSentence(def.Description)))
+		state := stateFor(m, tool.ActionOf(t))
+
+		lines = append(lines,
+			stateMark(state)+" "+menuPickStyle.Render(pad(def.Name, width+2))+
+				bodyStyle.Render(firstSentence(def.Description)))
 	}
-	m.notice("%s", strings.Join(lines, "\n"))
-	return nil
+	return m.show(fmt.Sprintf("tools · %d", len(m.agent.Tools)), lines)
+}
+
+func stateFor(m *Model, action permission.Action) int {
+	gate := m.agent.Gate
+	if gate == nil || gate.Policy == nil {
+		return stateAllow
+	}
+	switch verdict, _ := gate.Policy.Decide(permission.Request{Action: action}); verdict {
+	case permission.Allow:
+		return stateAllow
+	case permission.Deny:
+		return stateRefuse
+	}
+	return stateAsk
 }
 
 func firstSentence(s string) string {
@@ -419,7 +590,24 @@ func firstSentence(s string) string {
 func cmdVim(m *Model, arg string) tea.Cmd {
 	switch arg {
 	case "":
-		m.notice("vim: %s", onOff(m.vimEnabled()))
+		return m.ask(chooser{title: "vim · how the composer handles keys",
+			current: yesNo(m.vimEnabled()), options: []choice{
+				{label: "on", value: "on", detail: "starts in insert, esc for normal mode", body: []string{
+					keyed("motions", "h j k l w b e 0 ^ $ gg G, with counts: 3w 2j"),
+					keyed("insert", "i a I A o O"),
+					keyed("edits", "x X D C dd cc dw cw db d$ d0 de"),
+					keyed("visual", "v select · V by line · d c y on it · esc cancel"),
+					keyed("other", "u undo · p P paste what you last cut"),
+					"",
+					hintStyle.Render("⏎ always sends, in either mode. Nothing changes until you press esc."),
+				}},
+				{label: "off", value: "off", detail: "a plain text box", body: []string{
+					keyed("move", "← → ↑ ↓ · ⌥← ⌥→ by word · ⌃a ⌃e ends of the line"),
+					keyed("edit", "⌃w delete a word back · ⌃k to the end · ⌃u to the start"),
+					"",
+					hintStyle.Render("esc stops a running turn straight away instead of changing mode."),
+				}},
+			}, apply: func(m *Model, picked choice) { cmdVim(m, picked.value) }})
 	case "on", "true":
 		m.UseVim(true)
 		m.notice("vim → on (esc for normal mode)")
@@ -432,40 +620,106 @@ func cmdVim(m *Model, arg string) tea.Cmd {
 	return nil
 }
 
+func cmdCompact(m *Model, arg string) tea.Cmd {
+	if m.streaming {
+		m.notice("wait for the turn to finish")
+		return nil
+	}
+	if len(m.messages) < 2 {
+		m.notice("nothing to compact yet")
+		return nil
+	}
+	if arg != "!" {
+		return m.ask(chooser{title: "compact · fold what came before into a summary", current: "keep",
+			options: []choice{
+				{label: "keep it", value: "keep", detail: "leave the conversation whole", body: []string{
+					hintStyle.Render("Nothing happens. It will fold on its own when the window fills."),
+				}},
+				{label: "compact", value: "compact",
+					detail: fmt.Sprintf("%d messages become one summary", len(m.messages)),
+					body: []string{
+						keyed("now", humanTokens(m.agent.Used())+" of "+humanTokens(max(m.agent.Window(), 1))),
+						keyed("kept", "the most recent stretch, whole"),
+						keyed("cost", "one turn, to write the summary"),
+						"",
+						hintStyle.Render("The session file keeps everything; only what is sent gets shorter."),
+					}},
+			},
+			apply: func(m *Model, picked choice) {
+				if picked.value == "compact" {
+					cmdCompact(m, "!")
+				}
+			}})
+	}
+
+	m.streaming = true
+	m.startedAt = time.Now()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	m.cancel = cancel
+	m.agent.Hooks = m.hooks(ctx)
+
+	messages := m.messages
+	go func() {
+		kept, err := m.agent.Fold(ctx, messages)
+		m.events <- doneMsg{Messages: kept, Err: err}
+	}()
+	return m.spinner.Tick
+}
+
 func cmdUsage(m *Model, _ string) tea.Cmd {
 	u := m.sessionUsage
+	width := min(max(m.contentWidth()-34, 12), 40)
 
-	rows := [][2]string{
-		{"input", strconv.Itoa(u.InputTokens)},
-		{"output", strconv.Itoa(u.OutputTokens)},
+	lines := []string{}
+	if window := m.agent.Window(); window > 0 {
+		used := m.agent.Used()
+		lines = append(lines,
+			bar("context", used, window, width, contextHeat(used, window))+
+				metaStyle.Render(" of "+humanTokens(window)),
+			hintStyle.Render(pad("", 13)+contextNote(used, window)),
+			"")
 	}
+
+	biggest := max(u.InputTokens, max(u.OutputTokens, max(u.ThinkingTokens, u.CacheReadTokens)))
+	lines = append(lines,
+		bar("input", u.InputTokens, biggest, width, meterHeat[2]),
+		bar("output", u.OutputTokens, biggest, width, meterHeat[1]),
+	)
 	if u.ThinkingTokens > 0 {
-		rows = append(rows, [2]string{"thinking", strconv.Itoa(u.ThinkingTokens)})
+		lines = append(lines, bar("thinking", u.ThinkingTokens, biggest, width, meterHeat[0]))
 	}
 	if u.CacheReadTokens > 0 {
-		rows = append(rows, [2]string{"cache read", strconv.Itoa(u.CacheReadTokens)})
+		lines = append(lines, bar("cache read", u.CacheReadTokens, biggest, width, meterHeat[3]))
 	}
 	if u.CacheWriteTokens > 0 {
-		rows = append(rows, [2]string{"cache write", strconv.Itoa(u.CacheWriteTokens)})
-	}
-	rows = append(rows, [2]string{"messages", strconv.Itoa(len(m.messages))})
-	if id := m.sessionID(); id != "" {
-		rows = append(rows, [2]string{"session", id})
+		lines = append(lines, bar("cache write", u.CacheWriteTokens, biggest, width, meterHeat[3]))
 	}
 
-	label, value := 0, 0
-	for _, r := range rows {
-		label = max(label, len(r[0]))
-		value = max(value, len(r[1]))
-	}
+	lines = append(lines, "", hintStyle.Render(fmt.Sprintf("%d messages · %s · %s",
+		len(m.messages), m.modelName(), orDefault(m.sessionID(), "not saved"))))
+	return m.show("usage · "+m.provider, lines)
+}
 
-	lines := make([]string, 0, len(rows)+1)
-	lines = append(lines, "usage · "+m.provider+" · "+m.modelName())
-	for _, r := range rows {
-		lines = append(lines, fmt.Sprintf("  %-*s  %*s", label, r[0], value, r[1]))
+func contextHeat(used, window int) lipgloss.Style {
+	switch share := used * 100 / max(window, 1); {
+	case share > 85:
+		return meterHeat[4]
+	case share > 60:
+		return meterHeat[3]
 	}
-	m.notice("%s", strings.Join(lines, "\n"))
-	return nil
+	return meterHeat[1]
+}
+
+func contextNote(used, window int) string {
+	switch share := used * 100 / max(window, 1); {
+	case used == 0:
+		return "nothing sent yet"
+	case share > 85:
+		return "the next turn will fold the older half into a summary"
+	default:
+		return fmt.Sprintf("%d%% of the window", share)
+	}
 }
 
 func cmdSessions(m *Model, arg string) tea.Cmd {
@@ -480,6 +734,13 @@ func cmdSessions(m *Model, arg string) tea.Cmd {
 func cmdQuit(m *Model, _ string) tea.Cmd {
 	m.quitting = true
 	return tea.Quit
+}
+
+func yesNo(v bool) string {
+	if v {
+		return "on"
+	}
+	return "off"
 }
 
 func onOff(v bool) string {
@@ -508,4 +769,44 @@ func (m *Model) knownModels() []string {
 		return nil
 	}
 	return lister.Models()
+}
+
+// Asked of a real policy rather than written down, so the grid cannot claim
+// something the gate would not do.
+func capabilities(mode permission.Mode) []gridCell {
+	policy := permission.NewPolicy(mode)
+
+	actions := []struct {
+		label  string
+		action permission.Action
+	}{
+		{"read", permission.Read},
+		{"write", permission.Write},
+		{"run", permission.Execute},
+		{"fetch", permission.Network},
+	}
+
+	cells := make([]gridCell, 0, len(actions))
+	for _, a := range actions {
+		state := stateAsk
+		switch verdict, _ := policy.Decide(permission.Request{Action: a.action}); verdict {
+		case permission.Allow:
+			state = stateAllow
+		case permission.Deny:
+			state = stateRefuse
+		}
+		cells = append(cells, gridCell{label: a.label, state: state})
+	}
+	return cells
+}
+
+func keyed(label, value string) string {
+	return metaStyle.Render(pad(label, 10)) + bodyStyle.Render(value)
+}
+
+func orDefault(s, fallback string) string {
+	if s == "" {
+		return fallback
+	}
+	return s
 }

@@ -47,7 +47,7 @@ Flags: `-provider`, `-model`, `-max-tokens`, `-effort` (Anthropic only),
 `-system`, `-thinking`, `-plain`, `-v`, `-continue`/`-c`, `-resume`/`-r`,
 `-no-save`, `-log`, `-permission`, `-allow-outside`, `-tools`,
 `-exclude-tools`, `-no-tools`, `-no-subagents`, `-mcp`, `-no-mcp`, `-vim`,
-`-mouse`, `-animate`.
+`-mouse`, `-animate`, `-context-window`, `-no-compact`.
 
 Keys: `⏎` send, `⌥⏎` newline, `⌃j`/`⌃k` walk the chat, `↑`/`↓` earlier prompts,
 `⇧⇥` cycle permission mode, `PgUp`/`PgDn` and `⌃u`/`⌃d` scroll.
@@ -128,10 +128,36 @@ A line beginning with `/` acts on the session instead of going to the model:
     /system [prompt|-]   show, set, or drop the system prompt
     /permission [mode]   show or set when tools stop to ask  (/perm, /mode)
     /tools               list the tools the model has
+    /compact             fold the conversation so far into a summary
     /vim [on|off]        modal editing in the composer
     /usage               token usage for this session
     /sessions            pick up an earlier conversation   (/resume)
     /quit                leave zaino                  (/exit, /q)
+
+Every command that takes a value and is given none asks on a screen of its own,
+with what each option actually means under the list:
+
+- `/permission` shows a grid of what each mode permits — read, write, run,
+  fetch. It is asked of a real policy rather than written down, so it cannot
+  claim something the gate would not do.
+- `/vim` shows the key map for whichever mode is under the cursor.
+- `/thinking` shows what the transcript looks like either way.
+- `/model` and `/provider` show what carries over and what does not.
+- `/effort` is one dimension, so it lies across the screen instead: the stops
+  light up to where you are, warming as the scale climbs. `←`/`→` turn it up
+  and down, and `↑`/`↓` work too.
+
+`/clear` and `/compact` say what they are about to do before doing it, with the
+cursor on the harmless answer. `/clear !` and `/compact !` skip the question.
+
+The commands that answer rather than ask get a screen too. `/usage` draws the
+context window as a bar and says when the next turn will compact; `/tools`
+marks each tool with what it will do under the mode in force; `/help` lays out
+the commands and the key map; `/system` shows the prompt as rendered markdown.
+`j`/`k` scroll them, `esc` goes back.
+
+The bar leaves the same fading tail on these screens as it does in the
+transcript.
 
 Typing `/` opens a fuzzy-matched panel above the input: `↑`/`↓` choose, `⇥`
 completes, `⏎` runs the highlighted command. The panel is a function of what is
@@ -204,6 +230,28 @@ will not start is reported and skipped rather than taken as fatal. Nothing is
 known about what a server does, so its tools ask for approval like anything
 else that leaves the process. `-no-mcp` skips the lot.
 
+## Compaction
+
+A long session stops fitting. When the last turn's own token count passes the
+window less a reserve, everything but the recent stretch is folded into one
+summary and the conversation carries on from there. `/compact` does it on
+demand, `-context-window` says how much the model can hold, and `-no-compact`
+turns it off.
+
+Two details matter more than the summarising itself:
+
+- **The cut never strands a tool result.** A result whose call landed on the
+  other side of the boundary is rejected by the provider, so the cut moves
+  forward past it.
+- **A summary is a boundary in the session, like a clear.** It is written as
+  its own entry, the kept messages are written again after it, and reading the
+  log back is a matter of starting at the last boundary and going forwards. A
+  later `/clear` drops the summary with everything else.
+
+The trigger uses what the provider counted for the last turn, not an estimate,
+so it is the real context size that decides. The estimate is only a stand-in
+before the first turn has come back.
+
 ## Permission
 
 What the model may do without asking is a mode, and `⇧⇥` cycles it:
@@ -233,11 +281,11 @@ anything that would prompt is refused. Use `-permission accept-edits` or
 ## Status
 
 Streaming, the turn loop, tools, permissions, both providers, and the UI are
-implemented and tested — 252 tests, including the same tool round-trip driven
+implemented and tested — 299 tests, including the same tool round-trip driven
 through each provider to prove the loop is provider-agnostic.
 
-Not built: context compaction — the next thing that matters, and cheap given
-the session log: a `summary` entry that `Build` stops at.
+Not built: branching — every entry already carries an `id` and a `parent`, so
+the tree is what you get the first time the leaf is allowed to move backwards.
 
 ## History
 

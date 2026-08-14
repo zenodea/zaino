@@ -1,6 +1,10 @@
 package session
 
-import "github.com/zenodea/zaino/internal/llm"
+import (
+	"strings"
+
+	"github.com/zenodea/zaino/internal/llm"
+)
 
 type Recorder struct {
 	store Store
@@ -60,6 +64,33 @@ func (r *Recorder) Messages(messages []llm.Message) error {
 	}
 	r.written, r.pending = len(messages), nil
 	return firstErr
+}
+
+// The kept messages are written again after the summary rather than pointed
+// at where they already are. It costs a copy of the recent window per
+// compaction and makes reading the log back a matter of starting at the last
+// boundary and going forwards.
+func (r *Recorder) Compact(summary string, kept []llm.Message) error {
+	if r == nil {
+		return nil
+	}
+	err := r.Append(Compacted(summary))
+	r.written, r.pending = 0, nil
+
+	// The summary itself is rebuilt from the entry, not stored as a message.
+	if len(kept) > 0 && isSummary(kept[0]) {
+		kept = kept[1:]
+		r.written = 1
+	}
+	if messagesErr := r.Messages(kept); err == nil {
+		err = messagesErr
+	}
+	r.written = len(kept)
+	return err
+}
+
+func isSummary(m llm.Message) bool {
+	return m.Role == llm.RoleUser && strings.HasPrefix(m.Text(), SummaryPrefix)
 }
 
 func (r *Recorder) Clear() error {

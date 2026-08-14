@@ -21,6 +21,19 @@ type Call interface {
 	Run(ctx context.Context) (string, error)
 }
 
+// Asks is optional: a tool that always asks under the same action can say so
+// without a call being prepared, which is what lets /tools show it.
+type Asks interface {
+	Action() permission.Action
+}
+
+func ActionOf(t Tool) permission.Action {
+	if a, ok := t.(Asks); ok {
+		return a.Action()
+	}
+	return permission.Execute
+}
+
 func All(w *Workspace) []Tool {
 	return []Tool{
 		&Read{w}, &Write{w}, &Edit{w}, &Ls{w}, &Find{w}, &Grep{w}, &Bash{w}, &Fetch{},

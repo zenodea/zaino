@@ -39,6 +39,10 @@ type (
 		Messages []llm.Message
 		Err      error
 	}
+	compactMsg struct {
+		Summary string
+		Kept    []llm.Message
+	}
 )
 
 const (
@@ -55,6 +59,8 @@ type Model struct {
 	spinner  spinner.Model
 	menu     menu
 	picker   picker
+	chooser  chooser
+	sheet    sheet
 
 	recall     *recall.List
 	repo       session.Repo
@@ -175,6 +181,10 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.sessionUsage.CacheWriteTokens += msg.Usage.CacheWriteTokens
 		return m, m.waitForEvent()
 
+	case compactMsg:
+		m.compacted(msg)
+		return m, m.waitForEvent()
+
 	case doneMsg:
 		m.finishTurn(msg)
 		return m, m.waitForEvent()
@@ -212,6 +222,16 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if m.picker.open {
 		m.quitArmed = false
 		return m, m.handlePickerKey(msg)
+	}
+
+	if m.sheet.open {
+		m.quitArmed = false
+		return m.handleSheetKey(msg)
+	}
+
+	if m.chooser.open {
+		m.quitArmed = false
+		return m.handleChooserKey(msg)
 	}
 
 	if msg.String() == "esc" && !m.vimEnabled() && m.streaming && m.cancel != nil {
@@ -422,6 +442,9 @@ func (m *Model) hooks(ctx context.Context) agent.Hooks {
 		OnTurn: func(resp *llm.Response) {
 			emit(turnMsg{Model: resp.Model, Usage: resp.Usage, Stop: resp.StopReason})
 		},
+		OnCompact: func(summary string, kept []llm.Message) {
+			emit(compactMsg{Summary: summary, Kept: kept})
+		},
 	}
 }
 
@@ -597,7 +620,7 @@ func (m *Model) resize(width, height int) {
 }
 
 func (m *Model) viewportHeight() int {
-	chrome := 1 + 1 + 1 + 1 + m.input.Height() + m.menuHeight() + 1
+	chrome := 1 + 1 + 1 + 1 + m.input.Height() + m.menuHeight() + m.chooserHeight() + 1
 	return max(m.height-chrome, 3)
 }
 
@@ -641,15 +664,39 @@ func (m *Model) View() string {
 		}, "\n")
 	}
 
+	if m.sheet.open {
+		return strings.Join([]string{
+			pad.Render(m.header()),
+			"",
+			m.sheetView(),
+			pad.Render(rule(m.contentWidth())),
+			pad.Render(m.sheetFooter()),
+		}, "\n")
+	}
+
+	// A board is a screen of its own, for the same reason the picker is.
+	if m.onBoard() {
+		return strings.Join([]string{
+			pad.Render(m.header()),
+			"",
+			m.boardView(),
+			pad.Render(rule(m.contentWidth())),
+			pad.Render(hintStyle.Render("j/k or ↑↓ choose · ⏎ set · esc cancel")),
+		}, "\n")
+	}
+
 	lines := []string{
 		pad.Render(m.header()),
 		"",
 		pad.Render(m.viewport.View()),
 	}
-	if panel := m.askView(); panel != "" {
-		lines = append(lines, "", pad.Render(panel))
-	} else if panel := m.menuView(); panel != "" {
-		lines = append(lines, "", pad.Render(panel))
+	switch {
+	case m.askView() != "":
+		lines = append(lines, "", pad.Render(m.askView()))
+	case m.chooserView() != "":
+		lines = append(lines, "", pad.Render(m.chooserView()))
+	case m.menuView() != "":
+		lines = append(lines, "", pad.Render(m.menuView()))
 	}
 	lines = append(lines,
 		pad.Render(rule(m.contentWidth())),
@@ -731,6 +778,20 @@ func (m *Model) hints() []string {
 	case m.streaming:
 		return []string{fmt.Sprintf("working %s · ⌃c stop",
 			time.Since(m.startedAt).Round(time.Second)), "⌃c stop"}
+
+	case m.chooser.open && m.chooser.layout == layoutScale:
+		return []string{
+			"←→ or h/l turn it up and down · ⏎ set · esc cancel",
+			"←→ choose · ⏎ set · esc",
+			"⏎ set · esc",
+		}
+
+	case m.chooser.open:
+		return []string{
+			"↑↓ or j/k choose · ⏎ pick · esc cancel",
+			"↑↓ choose · ⏎ pick · esc",
+			"⏎ pick · esc",
+		}
 
 	case m.menu.open:
 		return []string{

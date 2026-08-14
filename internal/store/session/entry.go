@@ -17,6 +17,7 @@ const (
 	KindClear    Kind = "clear"
 
 	KindPermission Kind = "permission"
+	KindCompact    Kind = "compact"
 )
 
 // Unexported so entries can only be built through the constructors below,
@@ -72,6 +73,10 @@ func Effort(level string) New {
 
 func Clear() New {
 	return New{Type: KindClear}
+}
+
+func Compacted(text string) New {
+	return New{Type: KindCompact, body: body{Text: text}}
 }
 
 func Permission(tool, action, target, decision string) New {

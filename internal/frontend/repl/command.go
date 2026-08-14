@@ -1,6 +1,7 @@
 package repl
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"slices"
@@ -38,6 +39,7 @@ const help = `/help                list the commands
 /system [prompt|-]   show, set, or drop the system prompt
 /permission [mode]   show or set when tools stop to ask  (/perm, /mode)
 /tools               list the tools the model has
+/compact             fold the conversation so far into a summary
 /usage               token usage for this session
 /sessions            list saved sessions      (/resume)
 /quit                leave zaino              (/exit, /q)`
@@ -182,6 +184,15 @@ func runCommand(ag *agent.Agent, line string, messages []llm.Message,
 			lines = append(lines, "  "+t.Definition().Name)
 		}
 		notice("%s", strings.Join(lines, "\n"))
+
+	case "compact":
+		folded, err := ag.Fold(context.Background(), messages)
+		if err != nil {
+			fail("%s", err)
+			break
+		}
+		notice("compacted · %d messages kept", max(len(folded)-1, 0))
+		return false, false
 
 	case "usage":
 		notice("usage · %s · %s\n  input     %d\n  output    %d\n  think     %d\n  cached    %d\n  messages  %d\n  session   %s",

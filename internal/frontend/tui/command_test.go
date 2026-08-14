@@ -46,7 +46,7 @@ func TestCommandLineDetection(t *testing.T) {
 func TestSubmitRunsCommandInsteadOfSending(t *testing.T) {
 	m := newTestModel(t, 80, 24)
 	m.messages = []llm.Message{llm.UserText("earlier")}
-	typeLine(m, "/clear")
+	typeLine(m, "/clear !")
 
 	m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 
@@ -58,6 +58,48 @@ func TestSubmitRunsCommandInsteadOfSending(t *testing.T) {
 	}
 	if got := lastEntry(t, m); got.kind != entryNotice {
 		t.Errorf("want a notice, got %+v", got)
+	}
+}
+
+// Clearing is not destructive, but it is silent, so it says what leaves first.
+// A "!" is the way past it for anyone who would rather it just went.
+func TestClearAsksBeforeItGoes(t *testing.T) {
+	m := chooserModel(t)
+	m.messages = []llm.Message{llm.UserText("earlier"), llm.UserText("and more")}
+
+	m.runCommand("/clear")
+	if !m.chooser.open {
+		t.Fatal("/clear did not ask")
+	}
+	if len(m.messages) != 2 {
+		t.Error("/clear cleared before being answered")
+	}
+	if got := stripANSI(m.boardView()); !strings.Contains(got, "2 messages") {
+		t.Errorf("the screen does not say what leaves:\n%s", got)
+	}
+
+	// The cursor starts on the harmless option.
+	if m.chooser.options[m.chooser.cursor].value != "keep" {
+		t.Error("the cursor starts on clearing, so a stray ⏎ would do it")
+	}
+
+	m.Update(tea.KeyMsg{Type: tea.KeyDown})
+	m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if len(m.messages) != 0 {
+		t.Errorf("choosing to clear left %d messages", len(m.messages))
+	}
+}
+
+func TestClearWithABangSkipsTheQuestion(t *testing.T) {
+	m := chooserModel(t)
+	m.messages = []llm.Message{llm.UserText("earlier")}
+
+	m.runCommand("/clear !")
+	if m.chooser.open {
+		t.Error("/clear ! still asked")
+	}
+	if len(m.messages) != 0 {
+		t.Error("/clear ! did not clear")
 	}
 }
 
@@ -164,14 +206,23 @@ func TestSystemCommandSetsAndDrops(t *testing.T) {
 	}
 }
 
+func sheetText(t *testing.T, m *Model) string {
+	t.Helper()
+	if !m.sheet.open {
+		t.Fatal("no sheet was opened")
+	}
+	return stripANSI(m.sheet.title + "\n" + strings.Join(m.sheet.lines, "\n"))
+}
+
 func TestUsageCommandReportsSession(t *testing.T) {
 	m := newTestModel(t, 80, 24)
+	m.resize(80, 24)
 	send(m, turnMsg{Usage: llm.Usage{InputTokens: 1200, OutputTokens: 340}})
 
 	m.runCommand("/usage")
 
-	text := lastEntry(t, m).text
-	for _, want := range []string{"1200", "340", "anthropic"} {
+	text := sheetText(t, m)
+	for _, want := range []string{"1.2k", "340", "anthropic", "input", "output"} {
 		if !strings.Contains(text, want) {
 			t.Errorf("usage report missing %q:\n%s", want, text)
 		}
@@ -180,9 +231,10 @@ func TestUsageCommandReportsSession(t *testing.T) {
 
 func TestHelpListsEveryCommand(t *testing.T) {
 	m := newTestModel(t, 80, 24)
+	m.resize(80, 24)
 	m.runCommand("/help")
 
-	text := lastEntry(t, m).text
+	text := sheetText(t, m)
 	for _, c := range commandList() {
 		if !strings.Contains(text, "/"+c.name) {
 			t.Errorf("help omits /%s:\n%s", c.name, text)
@@ -267,8 +319,8 @@ func TestMenuNavigationAndEnter(t *testing.T) {
 	m.messages = []llm.Message{llm.UserText("earlier")}
 	m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 
-	if len(m.messages) != 0 {
-		t.Errorf("enter should have run the highlighted /clear, history = %+v", m.messages)
+	if !m.chooser.open || m.chooser.title == "" {
+		t.Errorf("enter should have run the highlighted /clear, which asks first")
 	}
 	if m.input.Value() != "" {
 		t.Errorf("input should be cleared, got %q", m.input.Value())

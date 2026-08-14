@@ -31,6 +31,8 @@ type taskArgs struct {
 	Prompt      string `json:"prompt"`
 }
 
+func (t *Task) Action() permission.Action { return permission.Read }
+
 func (t *Task) Definition() llm.Tool {
 	return llm.Tool{
 		Name: "task",

@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/zenodea/zaino/internal/permission"
+	"github.com/zenodea/zaino/internal/tool"
 )
 
 // A server that answers over a pipe, so the wire format is exercised without
@@ -232,4 +233,39 @@ func TestConfigNamesAreStable(t *testing.T) {
 	if got != "alpha,mid,zeta" {
 		t.Errorf("Names() = %q, want them sorted so the tool list holds still", got)
 	}
+}
+
+// No servers is the ordinary case: there is usually no mcp.json at all, and
+// the session that stands for "none" has to be usable without checking it.
+func TestAnEmptySessionIsUsable(t *testing.T) {
+	var none *Session
+
+	if got := none.All(); got != nil {
+		t.Errorf("All() = %v, want nothing", got)
+	}
+	none.Close()
+
+	tools := append([]string{"read"}, namesOf(none.All())...)
+	if len(tools) != 1 {
+		t.Errorf("appending an empty session's tools changed the list: %v", tools)
+	}
+}
+
+func TestConnectWithNoServersYieldsAnEmptySession(t *testing.T) {
+	session, failures := Connect(context.Background(), Config{})
+	if len(failures) != 0 {
+		t.Errorf("failures = %v, want none", failures)
+	}
+	if got := session.All(); len(got) != 0 {
+		t.Errorf("All() = %v, want no tools", got)
+	}
+	session.Close()
+}
+
+func namesOf(tools []tool.Tool) []string {
+	out := make([]string, 0, len(tools))
+	for _, t := range tools {
+		out = append(out, t.Definition().Name)
+	}
+	return out
 }

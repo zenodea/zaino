@@ -2,8 +2,13 @@ package session
 
 import "github.com/zenodea/zaino/internal/llm"
 
+// What a folded-up conversation is introduced with, so the model knows the
+// difference between a summary and something you said.
+const SummaryPrefix = "Summary of the conversation so far:\n\n"
+
 type Context struct {
 	Messages []llm.Message
+	Summary  string
 
 	Provider string
 	Model    string
@@ -19,11 +24,20 @@ type Context struct {
 func Build(entries []Entry) Context {
 	var c Context
 
-	start := 0
+	// A summary is a boundary like a clear, except that what came before it
+	// is not forgotten so much as folded into one message.
+	start, summary := 0, ""
 	for i, e := range entries {
-		if e.Type == KindClear {
-			start = i + 1
+		switch e.Type {
+		case KindClear:
+			start, summary = i+1, ""
+		case KindCompact:
+			start, summary = i+1, e.Text
 		}
+	}
+	c.Summary = summary
+	if summary != "" {
+		c.Messages = append(c.Messages, llm.UserText(SummaryPrefix+summary))
 	}
 
 	for _, e := range entries {

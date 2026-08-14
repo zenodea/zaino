@@ -173,7 +173,7 @@ func TestClearIsRecordedRatherThanDeleted(t *testing.T) {
 	m.Update(key("enter"))
 	send(m, doneMsg{Messages: []llm.Message{llm.UserText("hello")}})
 
-	typeLine(m, "/clear")
+	typeLine(m, "/clear !")
 	m.Update(key("enter"))
 
 	typeLine(m, "fresh start")
@@ -249,7 +249,7 @@ func TestNothingIsRecordedWithoutAStore(t *testing.T) {
 	m.Update(key("enter"))
 	send(m, doneMsg{Messages: []llm.Message{llm.UserText("hello")}})
 
-	typeLine(m, "/clear")
+	typeLine(m, "/clear !")
 	m.Update(key("enter"))
 
 	if m.sessionID() != "" {

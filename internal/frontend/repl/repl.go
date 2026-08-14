@@ -77,6 +77,11 @@ func Run(ag *agent.Agent, o Options) error {
 		}
 	}
 
+	ag.Hooks.OnCompact = func(summary string, kept []llm.Message) {
+		o.Recorder.Compact(summary, kept)
+		fmt.Fprintf(os.Stderr, "\x1b[2m[compacted, %d messages kept]\x1b[0m\n", max(len(kept)-1, 0))
+	}
+
 	interrupts := newInterrupts()
 	defer interrupts.stop()
 

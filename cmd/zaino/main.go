@@ -55,6 +55,10 @@ func run() error {
 		mcpConfig    = flag.String("mcp", "", "MCP servers to connect to (default: mcp.json beside the sessions)")
 		noMCP        = flag.Bool("no-mcp", false, "do not connect to any MCP server")
 
+		contextWindow = flag.Int("context-window", agent.DefaultWindow,
+			"tokens the model can hold before older messages are folded into a summary")
+		noCompact = flag.Bool("no-compact", false, "never summarise, and fail when the window fills")
+
 		vimKeys = flag.Bool("vim", true, "modal editing in the composer; -vim=false for plain input")
 		mouse   = flag.Bool("mouse", false,
 			"scroll with the wheel, at the cost of selecting text with the mouse")
@@ -121,7 +125,7 @@ func run() error {
 		return err
 	}
 	defer servers.Close()
-	tools = append(tools, servers.Tools...)
+	tools = append(tools, servers.All()...)
 
 	ag := &agent.Agent{
 		Provider:  backend,
@@ -132,6 +136,9 @@ func run() error {
 		Thinking:  &llm.Thinking{Enabled: true, Show: *showThink},
 		Tools:     tools,
 		Gate:      gate,
+	}
+	if !*noCompact {
+		ag.Compaction = &agent.Compaction{Window: *contextWindow}
 	}
 	if !*noTools && !*noTask {
 		ag.Tools = append(ag.Tools, agent.TaskTool(ag))

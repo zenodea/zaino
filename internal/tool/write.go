@@ -19,6 +19,8 @@ type writeArgs struct {
 	Content string `json:"content"`
 }
 
+func (w *Write) Action() permission.Action { return permission.Write }
+
 func (w *Write) Definition() llm.Tool {
 	return llm.Tool{
 		Name: "write",

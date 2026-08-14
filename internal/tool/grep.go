@@ -24,6 +24,8 @@ type grepArgs struct {
 	IgnoreCase bool   `json:"ignore_case,omitempty"`
 }
 
+func (g *Grep) Action() permission.Action { return permission.Read }
+
 func (g *Grep) Definition() llm.Tool {
 	return llm.Tool{
 		Name: "grep",

@@ -19,6 +19,8 @@ type lsArgs struct {
 	All  bool   `json:"all,omitempty"`
 }
 
+func (l *Ls) Action() permission.Action { return permission.Read }
+
 func (l *Ls) Definition() llm.Tool {
 	return llm.Tool{
 		Name:        "ls",

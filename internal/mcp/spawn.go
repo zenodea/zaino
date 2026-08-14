@@ -125,6 +125,14 @@ func Connect(ctx context.Context, cfg Config) (*Session, []error) {
 	return session, failures
 }
 
+// Nil-safe like Close: no servers is the ordinary case, not a special one.
+func (s *Session) All() []tool.Tool {
+	if s == nil {
+		return nil
+	}
+	return s.Tools
+}
+
 func (s *Session) Close() {
 	if s == nil {
 		return

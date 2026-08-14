@@ -152,3 +152,117 @@ func TestAmbiguousPrefixIsAnError(t *testing.T) {
 		t.Errorf("error = %v, want it to say what it matched", err)
 	}
 }
+
+func newStore(t *testing.T) session.Store {
+	t.Helper()
+	repo, err := session.OpenDir(t.TempDir(), "/work")
+	if err != nil {
+		t.Fatalf("OpenDir: %v", err)
+	}
+	store, err := repo.Create()
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	t.Cleanup(func() { store.Close() })
+	return store
+}
+
+func TestCompactionIsABoundaryLikeAClear(t *testing.T) {
+	store := newStore(t)
+
+	store.Append(session.Message(llm.UserText("the old question"), nil))
+	store.Append(session.Message(llm.UserText("more old talk"), nil))
+	store.Append(session.Compacted("they asked about the loop"))
+	store.Append(session.Message(llm.UserText("the recent one"), nil))
+
+	entries, err := store.Entries()
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := session.Build(entries)
+
+	if len(ctx.Messages) != 2 {
+		t.Fatalf("got %d messages, want the summary and what followed it: %+v", len(ctx.Messages), ctx.Messages)
+	}
+	if !strings.HasPrefix(ctx.Messages[0].Text(), session.SummaryPrefix) {
+		t.Errorf("first message = %q, want the summary rebuilt from the entry", ctx.Messages[0].Text())
+	}
+	if !strings.Contains(ctx.Messages[0].Text(), "asked about the loop") {
+		t.Errorf("summary text lost: %q", ctx.Messages[0].Text())
+	}
+	if ctx.Messages[1].Text() != "the recent one" {
+		t.Errorf("second message = %q", ctx.Messages[1].Text())
+	}
+	if ctx.Summary == "" {
+		t.Error("Context.Summary is empty")
+	}
+}
+
+// A clear after a compaction means start over, summary included.
+func TestClearDropsAnEarlierSummary(t *testing.T) {
+	store := newStore(t)
+
+	store.Append(session.Compacted("a summary"))
+	store.Append(session.Message(llm.UserText("after the summary"), nil))
+	store.Append(session.Clear())
+	store.Append(session.Message(llm.UserText("a fresh start"), nil))
+
+	entries, _ := store.Entries()
+	ctx := session.Build(entries)
+
+	if len(ctx.Messages) != 1 || ctx.Messages[0].Text() != "a fresh start" {
+		t.Errorf("messages = %+v, want only what came after the clear", ctx.Messages)
+	}
+	if ctx.Summary != "" {
+		t.Errorf("Summary = %q, want the clear to have dropped it", ctx.Summary)
+	}
+}
+
+func TestASecondCompactionSupersedesTheFirst(t *testing.T) {
+	store := newStore(t)
+
+	store.Append(session.Compacted("first summary"))
+	store.Append(session.Message(llm.UserText("middle"), nil))
+	store.Append(session.Compacted("second summary"))
+	store.Append(session.Message(llm.UserText("latest"), nil))
+
+	entries, _ := store.Entries()
+	ctx := session.Build(entries)
+
+	if len(ctx.Messages) != 2 {
+		t.Fatalf("got %d messages, want the newest summary and what followed", len(ctx.Messages))
+	}
+	if !strings.Contains(ctx.Messages[0].Text(), "second summary") {
+		t.Errorf("summary = %q, want the newest one", ctx.Messages[0].Text())
+	}
+}
+
+// What was kept is written again after the summary, so reading the log back is
+// a matter of starting at the boundary and going forwards.
+func TestRecorderWritesTheKeptMessagesAfterTheSummary(t *testing.T) {
+	store := newStore(t)
+	rec := session.NewRecorder(store)
+
+	rec.Messages([]llm.Message{llm.UserText("one"), llm.UserText("two"), llm.UserText("three")})
+
+	kept := []llm.Message{
+		llm.UserText(session.SummaryPrefix + "what happened"),
+		llm.UserText("three"),
+	}
+	if err := rec.Compact("what happened", kept); err != nil {
+		t.Fatalf("Compact: %v", err)
+	}
+	rec.Messages(append(kept, llm.UserText("four")))
+
+	entries, _ := store.Entries()
+	ctx := session.Build(entries)
+
+	var texts []string
+	for _, m := range ctx.Messages {
+		texts = append(texts, m.Text())
+	}
+	want := []string{session.SummaryPrefix + "what happened", "three", "four"}
+	if strings.Join(texts, "|") != strings.Join(want, "|") {
+		t.Errorf("rebuilt %q, want %q", texts, want)
+	}
+}
