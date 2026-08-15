@@ -7,49 +7,64 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 )
 
+// The bar column of every transcript line, top to bottom.
 func gutter(m *Model) string {
 	var b strings.Builder
-	for i := range m.entries {
-		bar := stripANSI(m.barFor(i))
-		if bar == "" {
-			bar = " "
+	for _, line := range strings.Split(stripANSI(m.transcript()), "\n") {
+		cell := " "
+		if runes := []rune(line); len(runes) > 1 {
+			cell = string(runes[1])
 		}
-		b.WriteString(bar)
+		if !strings.ContainsRune("▌▍▎▏", []rune(cell)[0]) {
+			cell = " "
+		}
+		b.WriteString(cell)
 	}
 	return b.String()
 }
 
+// The bar walks the lines between two entries, marking each as it passes.
 func TestCursorLeavesATrail(t *testing.T) {
 	m := longChat(t, 10)
 	m.UseAnimation(true)
 
 	m.moveCursor(-1)
-	m.moveCursor(-1)
+	m.moveCursor(-3)
 
-	if got := strings.TrimRight(gutter(m), " "); !strings.HasSuffix(got, "▌▌") {
-		t.Errorf("gutter = %q, want a mark left where the cursor came from", got)
+	marks := 0
+	for range 200 {
+		marks = max(marks, strings.Count(gutter(m), "▌")+
+			strings.Count(gutter(m), "▍")+strings.Count(gutter(m), "▎"))
+		if _, cmd := m.Update(frameMsg{}); cmd == nil {
+			break
+		}
+	}
+	if marks < 2 {
+		t.Errorf("only %d marks were ever on screen; the bar is not leaving a trail", marks)
 	}
 }
 
+// A tail that fades on a clock alone is a row of identical marks; it has to
+// thin with distance too.
 func TestTrailTapersByDistance(t *testing.T) {
 	m := longChat(t, 12)
 	m.UseAnimation(true)
-	for range 4 {
-		m.moveCursor(-1)
-	}
+	m.moveCursor(-1)
+	m.moveCursor(-4)
 
-	marks := []rune(strings.TrimRight(gutter(m), " "))
-	if len(marks) < 4 {
-		t.Fatalf("gutter = %q, want at least four marks", string(marks))
+	shapes := map[rune]bool{}
+	for range 200 {
+		for _, r := range gutter(m) {
+			if r != ' ' {
+				shapes[r] = true
+			}
+		}
+		if _, cmd := m.Update(frameMsg{}); cmd == nil {
+			break
+		}
 	}
-
-	tail := marks[len(marks)-4:]
-	seen := map[rune]bool{}
-	for _, r := range tail {
-		seen[r] = true
-	}
-	if len(seen) < 3 {
-		t.Errorf("tail = %q, want the marks to thin out behind the cursor", string(tail))
+	if len(shapes) < 3 {
+		t.Errorf("the tail only ever took %d shapes: %v", len(shapes), shapes)
 	}
 }
 
@@ -162,9 +177,6 @@ func TestTrailKeepsFadingThroughTheUpdateLoop(t *testing.T) {
 	}
 
 	_, cmd = m.Update(tea.KeyMsg{Type: tea.KeyCtrlK})
-	if len(m.motion.trail) == 0 {
-		t.Fatal("no trail was left behind")
-	}
 
 	// One press, then nothing but frames: the tail has to fade on its own.
 	seen := map[string]bool{}
@@ -184,5 +196,29 @@ func TestTrailKeepsFadingThroughTheUpdateLoop(t *testing.T) {
 	}
 	if m.motion.active {
 		t.Error("the frame loop is still running with nothing left to animate")
+	}
+}
+
+// Two full bars on screen read as two cursors rather than as one that has just
+// moved, so the tail never borrows the cursor's own glyph.
+func TestTheTailIsNeverMistakenForTheCursor(t *testing.T) {
+	for _, glyph := range trail {
+		if glyph.glyph == "▌" {
+			t.Errorf("the tail uses %q, which is the cursor's own mark", glyph.glyph)
+		}
+	}
+
+	m := longChat(t, 12)
+	m.UseAnimation(true)
+	m.moveCursor(-1)
+	m.moveCursor(-4)
+
+	for range 200 {
+		if got := strings.Count(gutter(m), "▌"); got > 1 {
+			t.Fatalf("%d full bars on screen at once: %q", got, gutter(m))
+		}
+		if _, cmd := m.Update(frameMsg{}); cmd == nil {
+			break
+		}
 	}
 }

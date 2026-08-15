@@ -23,7 +23,6 @@ func (m *Model) moveCursor(delta int) tea.Cmd {
 		if m.entries[next].render(m.contentWidth()) == "" {
 			continue
 		}
-		m.leaveTrail(m.cursor)
 		m.cursor = next
 		m.rerender()
 		return m.showCursor()
@@ -40,6 +39,7 @@ func (m *Model) clearCursor() {
 		return
 	}
 	m.cursor = -1
+	m.motion.barAt, m.motion.barTo = -1, -1
 	m.rerender()
 }
 
@@ -58,7 +58,7 @@ func (m *Model) toggleSelected() bool {
 	if strings.TrimSpace(m.input.Value()) != "" {
 		return false
 	}
-	if e.kind != entryTool {
+	if e.kind != entryTool && !e.folds() {
 		return true
 	}
 
@@ -75,6 +75,13 @@ func (m *Model) showCursor() tea.Cmd {
 
 	top := m.tops[m.cursor]
 	bottom := top + m.heights[m.cursor]
+
+	// Coming in from the composer the bar has nowhere to travel from, so it
+	// simply appears where you landed.
+	m.motion.barTo = top
+	if !m.motion.on || m.motion.barAt < 0 {
+		m.motion.barAt = top
+	}
 
 	target := m.viewport.YOffset
 	switch {

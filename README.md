@@ -62,16 +62,18 @@ in the footer; a second `⌃c` leaves, and any other key stands it down — so a
 stray press cannot be completed half a conversation later. `/exit` also works.
 Nothing else quits, and nothing else clears: use `/clear`.
 
-`⌃j`/`⌃k` move a bar down and up the transcript one thing at a time. With a
-tool call under the bar, `⏎` opens it up to show the arguments it was called
-with and everything it returned; `⏎` again closes it. Typing anything hands the
-keyboard back to the composer, and `⌃j` off the bottom does the same.
+`⌃j`/`⌃k` move a bar down and up the transcript one thing at a time, and the
+bar marks the line an entry starts on rather than every line it wraps over.
+With a tool call under it, `⏎` opens it up to show the arguments it was called
+with and everything it returned; an error that runs to several lines is shown
+by its first until `⏎` asks for the rest. Typing anything hands the keyboard
+back to the composer, and `⌃j` off the bottom does the same.
 
-The bar leaves a tail behind it — the mark on the entry you came from thins
-and dims over the next few frames, so a run of `⌃k` draws a comet down the
-gutter. It tapers by distance rather than by clock, so walking quickly still
-reads as a tail instead of a row of identical marks. The transcript eases
-into place under it rather than jumping. `-animate=false` turns all of it off.
+The bar walks the lines between two entries rather than jumping the gap,
+leaving a tail that thins and dims behind it. It covers a long distance in
+about the same time as a short one, and the tail never borrows the bar's own
+glyph — two full bars would read as two cursors. The transcript eases into
+place under it rather than jumping. `-animate=false` turns all of it off.
 
 The footer carries the permission mode at all times — `⏸ manual`,
 `⏵⏵ accept edits`, `◇ plan`, `⏵⏵ bypass` — next to the editing mode. When the
@@ -156,7 +158,9 @@ marks each tool with what it will do under the mode in force; `/help` lays out
 the commands and the key map; `/system` shows the prompt as rendered markdown.
 `j`/`k` scroll them, `esc` goes back.
 
-The bar leaves the same fading tail on these screens as it does in the
+An option with nothing else on its row says its name and its meaning together,
+with a blank line between it and the next. The bar walks the lines in between
+rather than jumping the gap, leaving the same fading tail it does in the
 transcript.
 
 Typing `/` opens a fuzzy-matched panel above the input: `↑`/`↓` choose, `⇥`
@@ -281,7 +285,7 @@ anything that would prompt is refused. Use `-permission accept-edits` or
 ## Status
 
 Streaming, the turn loop, tools, permissions, both providers, and the UI are
-implemented and tested — 299 tests, including the same tool round-trip driven
+implemented and tested — 310 tests, including the same tool round-trip driven
 through each provider to prove the loop is provider-agnostic.
 
 Not built: branching — every entry already carries an `id` and a `parent`, so

@@ -161,11 +161,12 @@ func rule(width int) string {
 	return ruleStyle.Render(string(line))
 }
 
+// The tail never uses the cursor's own glyph: two full bars on screen read as
+// two cursors rather than as one that has just moved.
 var trail = []struct {
 	glyph string
 	style lipgloss.Style
 }{
-	{"▌", lipgloss.NewStyle().Foreground(packDeep)},
 	{"▍", lipgloss.NewStyle().Foreground(packDeep)},
 	{"▎", lipgloss.NewStyle().Foreground(muted)},
 	{"▏", lipgloss.NewStyle().Foreground(subtle)},

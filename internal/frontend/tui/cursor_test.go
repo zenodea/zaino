@@ -147,13 +147,20 @@ func TestSelectedEntryIsMarked(t *testing.T) {
 	m := chatModel(t)
 	ctrl(m, tea.KeyCtrlK)
 
-	if !strings.Contains(m.rendered[m.cursor], "▌") {
-		t.Errorf("selected entry carries no bar: %q", stripANSI(m.rendered[m.cursor]))
-	}
-	for i, r := range m.rendered {
-		if i != m.cursor && strings.Contains(r, "▌") {
-			t.Errorf("entry %d is marked but not selected: %q", i, stripANSI(r))
+	lines := strings.Split(stripANSI(m.transcript()), "\n")
+	marked := 0
+	for i, line := range lines {
+		if !strings.Contains(line, "▌") {
+			continue
 		}
+		marked++
+		if i != m.tops[m.cursor] {
+			t.Errorf("line %d is marked but the selected entry starts at %d: %q",
+				i, m.tops[m.cursor], line)
+		}
+	}
+	if marked != 1 {
+		t.Errorf("%d lines carry a bar, want only the top line of the selected entry", marked)
 	}
 }
 
@@ -195,9 +202,11 @@ func TestCursorOffsetsMatchTheTranscript(t *testing.T) {
 		if top >= len(lines) {
 			t.Fatalf("entry %d claims line %d, transcript has %d", i, top, len(lines))
 		}
-		want := stripANSI(strings.Split(m.rendered[i], "\n")[0])
-		if lines[top] != want {
-			t.Errorf("entry %d says line %d, which holds %q, want %q", i, top, lines[top], want)
+		// The bar lives in the transcript rather than in the entry, so the
+		// comparison is of what comes after the gutter.
+		want := afterGutter(stripANSI(strings.Split(m.rendered[i], "\n")[0]))
+		if got := afterGutter(lines[top]); got != want {
+			t.Errorf("entry %d says line %d, which holds %q, want %q", i, top, got, want)
 		}
 	}
 }
@@ -231,5 +240,93 @@ func TestScrollingStaysPutWhenTheEntryIsAlreadyVisible(t *testing.T) {
 	m.moveCursor(-1)
 	if m.viewport.YOffset != at {
 		t.Errorf("the view moved to %d from %d for an entry already on screen", m.viewport.YOffset, at)
+	}
+}
+
+func afterGutter(line string) string {
+	if runes := []rune(line); len(runes) > gutterWidth {
+		return string(runes[gutterWidth:])
+	}
+	return ""
+}
+
+// A three-line error with a bar down every line is a wall, so it is shown by
+// its first line until it is asked for.
+func TestLongErrorsFold(t *testing.T) {
+	m := chooserModel(t)
+	m.ready = true
+	m.push(entry{kind: entryError, text: "gemini: 429 RESOURCE_EXHAUSTED: quota exceeded\nsee the rate limit docs\n* limit 20"})
+	m.rerender()
+
+	view := stripANSI(m.transcript())
+	if strings.Contains(view, "limit 20") {
+		t.Errorf("the whole error is on screen before being asked for:\n%s", view)
+	}
+	if !strings.Contains(view, "▸") {
+		t.Errorf("nothing says the error opens:\n%s", view)
+	}
+
+	m.moveCursor(-1)
+	m.toggleSelected()
+	if opened := stripANSI(m.transcript()); !strings.Contains(opened, "limit 20") {
+		t.Errorf("enter did not open the error:\n%s", opened)
+	}
+}
+
+func TestAOneLineErrorDoesNotFold(t *testing.T) {
+	m := chooserModel(t)
+	m.ready = true
+	m.push(entry{kind: entryError, text: "no such tool"})
+	m.rerender()
+
+	if view := stripANSI(m.transcript()); !strings.Contains(view, "✗") {
+		t.Errorf("a short error should keep its own marker:\n%s", view)
+	}
+}
+
+// Whatever the entry's height, only the line it starts on is marked.
+func TestOnlyTheTopLineIsMarked(t *testing.T) {
+	m := chooserModel(t)
+	m.resize(50, 24)
+	m.ready = true
+	m.push(entry{kind: entryAssistant, text: strings.Repeat("a long answer that wraps several times ", 8)})
+	m.rerender()
+
+	m.UseAnimation(false)
+	m.moveCursor(-1)
+
+	lines := strings.Split(stripANSI(m.transcript()), "\n")
+	if len(lines) < 4 {
+		t.Fatalf("expected the entry to wrap, got %d lines", len(lines))
+	}
+	for i, line := range lines[1:] {
+		if strings.Contains(line, "▌") {
+			t.Errorf("line %d of the entry is marked too: %q", i+1, line)
+		}
+	}
+}
+
+// The bar covers a long gap in about the same time as a short one.
+func TestTravelTakesTheSameTimeHoweverFar(t *testing.T) {
+	frames := func(entries int) int {
+		m := longChat(t, entries)
+		m.UseAnimation(true)
+		m.moveCursor(-1)
+		m.moveCursor(-2 * entries)
+
+		n := 0
+		for range 400 {
+			if m.motion.barAt == m.motion.barTo {
+				break
+			}
+			m.Update(frameMsg{})
+			n++
+		}
+		return n
+	}
+
+	near, far := frames(4), frames(30)
+	if far > near*3 {
+		t.Errorf("a long move took %d frames against %d for a short one", far, near)
 	}
 }

@@ -119,6 +119,7 @@ func New(ag *agent.Agent, providerName string) *Model {
 		rec:      session.NewRecorder(nil),
 		events:   make(chan tea.Msg, 64),
 		cursor:   -1,
+		motion:   motion{barAt: -1, barTo: -1},
 	}
 }
 
@@ -501,7 +502,7 @@ func (m *Model) push(e entry) {
 func (m *Model) appendToOpenEntry(kind entryKind, text string) {
 	if n := len(m.entries); n > 0 && m.entries[n-1].kind == kind {
 		m.entries[n-1].text += text
-		m.rendered[n-1] = m.entries[n-1].renderAs(m.contentWidth(), m.barFor(n-1))
+		m.rendered[n-1] = m.entries[n-1].render(m.contentWidth())
 		m.syncViewport()
 		return
 	}
@@ -519,7 +520,7 @@ func (m *Model) completeTool(msg toolResultMsg) {
 		e.resultLen = len(msg.Result)
 		e.toolResult = msg.Result
 		m.entries[i] = e
-		m.rendered[i] = e.renderAs(m.contentWidth(), m.barFor(i))
+		m.rendered[i] = e.render(m.contentWidth())
 		m.syncViewport()
 		return
 	}
@@ -537,19 +538,40 @@ func (m *Model) syncViewport() {
 }
 
 func (m *Model) splash() string {
+	dot := metaStyle.Render("  ·  ")
 	keys := []string{
-		keyHint("⏎", "send"),
-		keyHint("/", "commands"),
-		keyHint("⇧⇥", "permission mode"),
-		keyHint("esc", "normal mode"),
+		strings.Join([]string{
+			keyHint("⏎", "send"), keyHint("/", "commands"),
+			keyHint("⇧⇥", "permission mode"), keyHint("esc", "normal mode"),
+		}, dot),
+		strings.Join([]string{
+			keyHint("⏎", "send"), keyHint("/", "commands"), keyHint("⇧⇥", "permission"),
+		}, dot),
+		strings.Join([]string{keyHint("⏎", "send"), keyHint("/", "commands")}, dot),
 	}
+
 	lines := append(strings.Split(logo(), "\n"),
 		"",
 		hintStyle.Render("an agent harness, in a backpack"),
 		"",
-		strings.Join(keys, metaStyle.Render("  ·  ")),
+		fit(keys, m.contentWidth()),
 	)
-	return lipgloss.NewStyle().PaddingTop(1).Render(strings.Join(lines, "\n"))
+
+	// Centred on both axes: an empty screen has nothing else to hang it on.
+	for i, line := range lines {
+		lines[i] = indent(line, (m.contentWidth()-lipgloss.Width(line))/2)
+	}
+	if top := (m.viewport.Height - len(lines)) / 2; top > 0 {
+		lines = append(make([]string, top), lines...)
+	}
+	return strings.Join(lines, "\n")
+}
+
+func indent(s string, by int) string {
+	if by <= 0 {
+		return s
+	}
+	return strings.Repeat(" ", by) + s
 }
 
 func (m *Model) transcript() string {
@@ -572,15 +594,44 @@ func (m *Model) transcript() string {
 		kind := m.entries[i].kind
 
 		if len(out) > 0 && !(tight(previous) && tight(kind)) {
-			out = append(out, "")
+			out = append(out, m.blankRow(len(out)))
 		}
 
 		m.tops[i] = len(out)
-		m.heights[i] = strings.Count(rendered, "\n") + 1
+		height := strings.Count(rendered, "\n") + 1
+		m.heights[i] = height
+
+		// Bars do not change how anything wraps — they sit in the gutter that
+		// is already there — so the line count is the same either way.
+		if bars := m.barsWithin(len(out), height); len(bars) > 0 {
+			rendered = m.entries[i].renderAs(m.contentWidth(), bars)
+		}
 		out = append(out, rendered)
 		previous = kind
 	}
 	return strings.Join(out, "\n")
+}
+
+func (m *Model) barsWithin(top, height int) map[int]string {
+	var bars map[int]string
+	for line := top; line < top+height; line++ {
+		if bar := m.barForLine(line); bar != noBar() {
+			if bars == nil {
+				bars = map[int]string{}
+			}
+			bars[line-top] = bar
+		}
+	}
+	return bars
+}
+
+// The gap between two entries is ground the bar can be on, so it is a row like
+// any other rather than an empty string.
+func (m *Model) blankRow(line int) string {
+	if bar := m.barForLine(line); bar != noBar() {
+		return " " + bar
+	}
+	return ""
 }
 
 func tight(kind entryKind) bool {
@@ -590,8 +641,8 @@ func tight(kind entryKind) bool {
 func (m *Model) rerender() {
 	width := m.contentWidth()
 	m.rendered = m.rendered[:0]
-	for i, e := range m.entries {
-		m.rendered = append(m.rendered, e.renderAs(width, m.barFor(i)))
+	for _, e := range m.entries {
+		m.rendered = append(m.rendered, e.render(width))
 	}
 	m.syncViewport()
 }

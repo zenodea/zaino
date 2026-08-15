@@ -49,6 +49,12 @@ func (e entry) marker() (string, lipgloss.Style) {
 		}
 		return "▸", toolMarker
 	case entryError:
+		if e.folds() && !e.expanded {
+			return "▸", errorMarker
+		}
+		if e.folds() {
+			return "▾", errorMarker
+		}
 		return "✗", errorMarker
 	default:
 		return " ", metaStyle
@@ -72,15 +78,34 @@ func (e entry) bodyStyle() lipgloss.Style {
 	}
 }
 
-func (e entry) render(width int) string { return e.renderAs(width, noBar()) }
+// Anything that runs past a line or two is shown by its first line until it is
+// asked for: a three-line error with a bar down every line is a wall.
+func (e entry) folds() bool {
+	if e.kind != entryError && e.kind != entryNotice {
+		return false
+	}
+	return strings.Contains(strings.TrimSpace(e.text), "\n")
+}
 
-func (e entry) renderAs(width int, bar string) string {
+func (e entry) firstLine() string {
+	line, _, _ := strings.Cut(strings.TrimSpace(e.text), "\n")
+	return line
+}
+
+func (e entry) render(width int) string { return e.renderAs(width, nil) }
+
+// bars is keyed by line within this entry, so a bar travelling through a long
+// entry can sit on any of its lines rather than only on the first.
+func (e entry) renderAs(width int, bars map[int]string) string {
 	marker, markerStyle := e.marker()
 	bodyWidth := max(width-gutterWidth, 20)
 
 	text := e.text
-	if e.kind == entryTool {
+	switch {
+	case e.kind == entryTool:
 		text = e.toolLine(bodyWidth)
+	case e.folds() && !e.expanded:
+		text = e.firstLine()
 	}
 	if strings.TrimSpace(text) == "" {
 		return ""
@@ -99,23 +124,22 @@ func (e entry) renderAs(width int, bar string) string {
 		wrapped += "\n" + e.detail(bodyWidth)
 	}
 
-	head, pad := gutters(marker, markerStyle, bar)
+	rest := strings.Repeat(" ", max(gutterWidth-lipgloss.Width(marker)-1, 0))
 
 	lines := strings.Split(wrapped, "\n")
 	for i, line := range lines {
 		line = strings.TrimRight(line, " ")
+		bar, ok := bars[i]
+		if !ok {
+			bar = noBar()
+		}
 		if i == 0 {
-			lines[i] = head + line
+			lines[i] = markerStyle.Render(marker) + bar + rest + line
 			continue
 		}
-		lines[i] = pad + line
+		lines[i] = " " + bar + rest + line
 	}
 	return strings.Join(lines, "\n")
-}
-
-func gutters(marker string, markerStyle lipgloss.Style, bar string) (head, pad string) {
-	rest := strings.Repeat(" ", max(gutterWidth-lipgloss.Width(marker)-1, 0))
-	return markerStyle.Render(marker) + bar + rest, " " + bar + rest
 }
 
 func (e entry) detail(width int) string {

@@ -357,23 +357,88 @@ func TestTheBoardShowsTheHighlightedOptionsDetail(t *testing.T) {
 	}
 }
 
-// The bar leaves a tail here as it does in the transcript.
-func TestTheBoardCursorLeavesATrail(t *testing.T) {
+// The bar travels the lines between two options rather than jumping the gap,
+// marking each one as it passes.
+func TestTheBarTravelsBetweenOptions(t *testing.T) {
 	m := chooserModel(t)
 	m.UseAnimation(true)
-	m.runCommand("/permission")
+	m.runCommand("/vim")
 
+	from := m.chooser.barAt
 	m.moveChooser(1)
-	if len(m.chooser.trail) == 0 {
-		t.Fatal("moving left no trail")
+	to := m.chooser.barTo
+
+	if to == from {
+		t.Fatal("the options share a line, so there is nothing to travel")
+	}
+	if m.chooser.barAt != from {
+		t.Error("the bar arrived before a single frame had run")
 	}
 
+	seen := map[int]bool{}
 	for range 200 {
+		seen[m.chooser.barAt] = true
 		if _, cmd := m.Update(frameMsg{}); cmd == nil {
 			break
 		}
 	}
+
+	if m.chooser.barAt != to {
+		t.Errorf("the bar stopped at line %d, want %d", m.chooser.barAt, to)
+	}
+	for line := min(from, to); line <= max(from, to); line++ {
+		if !seen[line] {
+			t.Errorf("the bar skipped line %d on its way from %d to %d", line, from, to)
+		}
+	}
 	if len(m.chooser.trail) != 0 {
 		t.Errorf("the trail never faded: %v", m.chooser.trail)
+	}
+}
+
+// With animation off there is nothing to travel through, so it is simply there.
+func TestTheBarArrivesAtOnceWithAnimationOff(t *testing.T) {
+	m := chooserModel(t)
+	m.UseAnimation(false)
+	m.runCommand("/vim")
+
+	m.moveChooser(1)
+	if m.chooser.barAt != m.chooser.barTo {
+		t.Errorf("bar at %d, want %d", m.chooser.barAt, m.chooser.barTo)
+	}
+}
+
+// Two options with nothing else on the row say their name and their meaning
+// together, with air between them.
+func TestTwoOptionBoardsUseOneLineEach(t *testing.T) {
+	m := chooserModel(t)
+	m.UseAnimation(false)
+	m.runCommand("/vim")
+
+	view := stripANSI(m.boardView())
+	if !strings.Contains(view, "on — starts in insert") {
+		t.Errorf("the name and its meaning are not on one line:\n%s", view)
+	}
+
+	lines := strings.Split(view, "\n")
+	for i, line := range lines {
+		if !strings.Contains(line, "on — starts") {
+			continue
+		}
+		if i+1 >= len(lines) || strings.TrimSpace(lines[i+1]) != "" {
+			t.Errorf("no blank line between the options:\n%s", view)
+		}
+		return
+	}
+}
+
+// An option carrying a grid still needs its own line for the detail.
+func TestGridOptionsKeepTheirSecondLine(t *testing.T) {
+	m := chooserModel(t)
+	m.runCommand("/permission")
+
+	lines := optionLines(m.chooser.options)
+	if lines[1]-lines[0] != 3 {
+		t.Errorf("options are %d lines apart, want 3 (row, detail, blank)", lines[1]-lines[0])
 	}
 }

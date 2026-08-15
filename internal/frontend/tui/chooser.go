@@ -57,14 +57,21 @@ type chooser struct {
 	fill int
 	tick int
 
-	// The row you came from, fading, as in the transcript.
+	// The bar lives at a line rather than at an option, so it can travel the
+	// gap between two options instead of jumping it.
+	lines []int
+	barAt int
+	barTo int
+	step  int
+
+	// The lines it came through, fading, as in the transcript.
 	trail map[int]int
 }
 
 const (
-	framesPerCell      = 4
-	chooserFrameHeight = 4
-	scaleFrameHeight   = 9
+	framesPerCell    = 4
+	framesPerLine    = 2
+	scaleFrameHeight = 9
 )
 
 func (m *Model) ask(c chooser) tea.Cmd {
@@ -79,6 +86,9 @@ func (m *Model) ask(c chooser) tea.Cmd {
 			break
 		}
 	}
+	c.lines = optionLines(c.options)
+	c.barAt, c.barTo = c.lines[c.cursor], c.lines[c.cursor]
+
 	m.chooser = c
 	m.syncHeight()
 	return m.startFill()
@@ -128,10 +138,30 @@ func (m *Model) moveChooser(delta int) tea.Cmd {
 	if n == 0 || delta == 0 {
 		return nil
 	}
-	m.leaveChooserTrail(m.chooser.cursor)
 	m.chooser.cursor = (m.chooser.cursor + delta + n) % n
-	m.chooser.fill, m.chooser.tick = 0, 0
+	m.chooser.barTo = m.chooser.lines[m.chooser.cursor]
+	m.chooser.fill, m.chooser.tick, m.chooser.step = 0, 0, 0
+
+	if !m.motion.on {
+		m.leaveChooserTrail(m.chooser.barAt)
+		m.chooser.barAt = m.chooser.barTo
+	}
 	return m.startFill()
+}
+
+// Where each option's first line falls. An option carrying a grid needs a
+// second line for its detail; everything else says it all on one.
+func optionLines(options []choice) []int {
+	lines, at := make([]int, len(options)), 0
+	for i, o := range options {
+		lines[i] = at
+		at++
+		if len(o.grid) > 0 && o.detail != "" {
+			at++
+		}
+		at++
+	}
+	return lines
 }
 
 func (m *Model) leaveChooserTrail(from int) {
@@ -151,6 +181,26 @@ func (m *Model) leaveChooserTrail(from int) {
 	m.chooser.trail[from] = trailLife()
 }
 
+// One line at a time, marking each as it goes, so the bar is seen to travel
+// rather than to reappear somewhere else.
+func (m *Model) advanceBar() bool {
+	if m.chooser.barAt == m.chooser.barTo {
+		return false
+	}
+	if m.chooser.step++; m.chooser.step < framesPerLine {
+		return true
+	}
+
+	m.chooser.step = 0
+	m.leaveChooserTrail(m.chooser.barAt)
+	if m.chooser.barAt < m.chooser.barTo {
+		m.chooser.barAt++
+	} else {
+		m.chooser.barAt--
+	}
+	return m.chooser.barAt != m.chooser.barTo
+}
+
 func (m *Model) fadeChooserTrail() bool {
 	for i := range m.chooser.trail {
 		if m.chooser.trail[i]--; m.chooser.trail[i] <= 0 {
@@ -160,11 +210,11 @@ func (m *Model) fadeChooserTrail() bool {
 	return len(m.chooser.trail) > 0
 }
 
-func (m *Model) chooserBar(i int) string {
-	if i == m.chooser.cursor {
+func (m *Model) boardBar(line int) string {
+	if line == m.chooser.barAt {
 		return cursorBar()
 	}
-	if life, ok := m.chooser.trail[i]; ok {
+	if life, ok := m.chooser.trail[line]; ok {
 		return trailBar((life + framesPerShade - 1) / framesPerShade)
 	}
 	return " "
@@ -193,9 +243,10 @@ func (m *Model) fillMeter() bool {
 	if !m.chooser.open {
 		return false
 	}
+	moving := m.advanceBar()
 	fading := m.fadeChooserTrail()
 	if m.chooser.fill >= m.fillTarget() {
-		return fading
+		return moving || fading
 	}
 	if m.chooser.tick++; m.chooser.tick >= framesPerCell {
 		m.chooser.fill, m.chooser.tick = m.chooser.fill+1, 0
@@ -279,6 +330,15 @@ func (m *Model) boardView() string {
 	}
 
 	lines := []string{" " + metaStyle.Render(m.chooser.title), ""}
+	at := 0
+
+	// A line is written with the bar in front of it, so the bar can sit on any
+	// of them — including the blank ones it is passing through.
+	row := func(text string) {
+		lines = append(lines, clamp(strings.TrimRight(" "+m.boardBar(at)+" "+text, " "), m.contentWidth()))
+		at++
+	}
+
 	for i, o := range m.chooser.options {
 		style := metaStyle
 		if i == m.chooser.cursor {
@@ -289,27 +349,36 @@ func (m *Model) boardView() string {
 			here = "· "
 		}
 
-		// The label is padded before the mark, so the marks form a column and
-		// two options can be compared down the screen.
-		var grid strings.Builder
-		for _, g := range o.grid {
-			grid.WriteString(hintStyle.Render(pad(g.label, name)) + " " + stateMark(g.state) + "   ")
+		if len(o.grid) > 0 {
+			var grid strings.Builder
+			for _, g := range o.grid {
+				grid.WriteString(hintStyle.Render(pad(g.label, name)) + " " + stateMark(g.state) + "   ")
+			}
+			row(here + style.Render(pad(o.label, label+2)) + grid.String())
+			if o.detail != "" {
+				row("   " + hintStyle.Render(o.detail))
+			}
+			row("")
+			continue
 		}
 
-		row := " " + m.chooserBar(i) + " " + here + style.Render(pad(o.label, label+2)) + grid.String()
-		lines = append(lines, clamp(strings.TrimRight(row, " "), m.contentWidth()))
+		// One line: the name and what it means belong together when there is
+		// nothing else competing for the row.
+		line := here + style.Render(o.label)
 		if o.detail != "" {
-			lines = append(lines, "     "+hintStyle.Render(clamp(o.detail, m.contentWidth()-6)))
+			line += hintStyle.Render(" — " + o.detail)
 		}
+		row(line)
+		row("")
 	}
 
 	if body := m.chooser.options[m.chooser.cursor].body; len(body) > 0 {
-		lines = append(lines, "", " "+gutterStyle.Render(strings.Repeat("╌", max(m.contentWidth()-2, 10))), "")
+		lines = append(lines, " "+gutterStyle.Render(strings.Repeat("╌", max(m.contentWidth()-2, 10))), "")
 		for _, line := range body {
 			lines = append(lines, " "+clamp(line, m.contentWidth()-2))
 		}
 	}
-	return strings.Join(lines, "\n")
+	return strings.Join(trimTrailingBlanks(lines), "\n")
 }
 
 func centre(s string, width int) string {
