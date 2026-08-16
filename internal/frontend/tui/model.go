@@ -16,6 +16,7 @@ import (
 	"github.com/zenodea/zaino/internal/agent"
 	"github.com/zenodea/zaino/internal/llm"
 	"github.com/zenodea/zaino/internal/permission"
+	"github.com/zenodea/zaino/internal/store/credentials"
 	"github.com/zenodea/zaino/internal/store/recall"
 	"github.com/zenodea/zaino/internal/store/session"
 	"github.com/zenodea/zaino/internal/store/wirelog"
@@ -61,7 +62,9 @@ type Model struct {
 	picker   picker
 	chooser  chooser
 	sheet    sheet
+	secret   secret
 
+	creds      *credentials.Store
 	recall     *recall.List
 	repo       session.Repo
 	rec        *session.Recorder
@@ -84,6 +87,7 @@ type Model struct {
 	lastModel    string
 
 	pending *pendingAsk
+	limit   limitGate
 	vim     vim
 
 	cursor  int
@@ -93,6 +97,20 @@ type Model struct {
 
 	quitting  bool
 	quitArmed bool
+
+	// Set by an overlay's apply, which cannot return a command itself.
+	queued tea.Cmd
+
+	fetched        map[string][]string
+	awaitingModels bool
+}
+
+func (m *Model) runCmd(cmd tea.Cmd) { m.queued = cmd }
+
+func (m *Model) takeQueued() tea.Cmd {
+	cmd := m.queued
+	m.queued = nil
+	return cmd
 }
 
 func New(ag *agent.Agent, providerName string) *Model {
@@ -132,6 +150,11 @@ func (m *Model) waitForEvent() tea.Cmd {
 }
 
 func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	model, cmd := m.update(msg)
+	return model, m.withFrame(cmd)
+}
+
+func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.resize(msg.Width, msg.Height)
@@ -165,6 +188,12 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case toolResultMsg:
 		m.completeTool(msg)
 		return m, m.waitForEvent()
+
+	case modelsMsg:
+		return m, m.receiveModels(msg)
+
+	case loginDoneMsg:
+		return m, m.finishLogin(msg)
 
 	case askMsg:
 		m.pending = &pendingAsk{req: msg.req, reply: msg.reply}
@@ -209,15 +238,49 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 
 	var cmd tea.Cmd
+	if m.secret.open {
+		// The composer is not the focused field while a key is being typed,
+		// so the blink has to follow the masked one.
+		m.secret.input, cmd = m.secret.input.Update(msg)
+		return m, cmd
+	}
 	m.input, cmd = m.input.Update(msg)
 	m.syncInputChrome()
 	return m, cmd
+}
+
+// overlay floats a panel over the last lines of a block. Anything that opens
+// while you type belongs on top of the transcript, not wedged into it.
+func overlay(base, panel string) string {
+	if panel == "" {
+		return base
+	}
+	baseLines := strings.Split(base, "\n")
+	panelLines := strings.Split(panel, "\n")
+
+	if len(panelLines) >= len(baseLines) {
+		return strings.Join(panelLines[len(panelLines)-len(baseLines):], "\n")
+	}
+	copy(baseLines[len(baseLines)-len(panelLines):], panelLines)
+	return strings.Join(baseLines, "\n")
 }
 
 func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if m.pending != nil {
 		m.quitArmed = false
 		return m.handleAskKey(msg)
+	}
+
+	if m.limit.open {
+		m.quitArmed = false
+		return m.handleLimitKey(msg)
+	}
+
+	// Ahead of every other overlay: while a key is being typed, no keystroke
+	// may reach a binding that could echo or record it.
+	if m.secret.open {
+		m.quitArmed = false
+		return m.handleSecretKey(msg)
 	}
 
 	if m.picker.open {
@@ -256,11 +319,9 @@ func (m *Model) handleAppKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if m.menu.open {
 		switch msg.String() {
 		case "up", "ctrl+p":
-			m.moveMenu(-1)
-			return m, nil
+			return m, m.moveMenu(-1)
 		case "down", "ctrl+n":
-			m.moveMenu(1)
-			return m, nil
+			return m, m.moveMenu(1)
 		case "tab":
 			m.complete()
 			return m, nil
@@ -410,6 +471,12 @@ func (m *Model) submit() tea.Cmd {
 	m.push(entry{kind: entryUser, text: prompt})
 	m.messages = append(m.messages, llm.UserText(prompt))
 
+	return m.launch()
+}
+
+// Hands the conversation as it stands to the agent. Sending a fresh prompt and
+// re-sending one the ceiling stopped differ only in what came before this.
+func (m *Model) launch() tea.Cmd {
 	m.streaming = true
 	m.startedAt = time.Now()
 
@@ -468,8 +535,12 @@ func (m *Model) finishTurn(msg doneMsg) {
 	}
 	m.saveError(m.rec.Messages(m.messages))
 
+	var overLimit *agent.ContextLimitError
+
 	switch {
 	case msg.Err == nil:
+	case errors.As(msg.Err, &overLimit):
+		m.holdAtLimit(overLimit)
 	case errors.Is(msg.Err, context.Canceled):
 		m.push(entry{kind: entryNotice, text: "interrupted"})
 	case errors.Is(msg.Err, agent.ErrTruncated):
@@ -671,7 +742,9 @@ func (m *Model) resize(width, height int) {
 }
 
 func (m *Model) viewportHeight() int {
-	chrome := 1 + 1 + 1 + 1 + m.input.Height() + m.menuHeight() + m.chooserHeight() + 1
+	// The menu is not in this sum: it floats over the transcript rather than
+	// pushing it, so opening it must not resize anything underneath.
+	chrome := 1 + 1 + 1 + 1 + m.input.Height() + m.chooserHeight() + 1
 	return max(m.height-chrome, 3)
 }
 
@@ -705,6 +778,14 @@ func (m *Model) View() string {
 
 	pad := lipgloss.NewStyle().PaddingLeft(1)
 
+	if m.secret.open {
+		return strings.Join([]string{
+			pad.Render(m.header()),
+			"",
+			m.secretView(),
+		}, "\n")
+	}
+
 	if m.picker.open {
 		return strings.Join([]string{
 			pad.Render(m.header()),
@@ -736,19 +817,21 @@ func (m *Model) View() string {
 		}, "\n")
 	}
 
-	lines := []string{
-		pad.Render(m.header()),
-		"",
-		pad.Render(m.viewport.View()),
-	}
+	body := pad.Render(m.viewport.View())
+
+	var below []string
 	switch {
+	case m.limitView() != "":
+		below = []string{"", pad.Render(m.limitView())}
 	case m.askView() != "":
-		lines = append(lines, "", pad.Render(m.askView()))
+		below = []string{"", pad.Render(m.askView())}
 	case m.chooserView() != "":
-		lines = append(lines, "", pad.Render(m.chooserView()))
+		below = []string{"", pad.Render(m.chooserView())}
 	case m.menuView() != "":
-		lines = append(lines, "", pad.Render(m.menuView()))
+		body = overlay(body, pad.Render(m.menuView()))
 	}
+
+	lines := append([]string{pad.Render(m.header()), "", body}, below...)
 	lines = append(lines,
 		pad.Render(rule(m.contentWidth())),
 		pad.Render(m.inputView()),

@@ -64,6 +64,7 @@ func (a *Agent) compact(ctx context.Context, history []llm.Message) ([]llm.Messa
 
 	kept := append([]llm.Message{llm.UserText(SummaryPrefix + summary)}, history[cut:]...)
 	a.used = estimateTokens(kept)
+	a.forget()
 
 	if a.Hooks.OnCompact != nil {
 		a.Hooks.OnCompact(summary, kept)

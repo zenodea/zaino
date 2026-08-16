@@ -3,7 +3,9 @@ package tui
 import (
 	"context"
 	"fmt"
+	"slices"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 	"unicode"
@@ -11,6 +13,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
+	"github.com/zenodea/zaino/internal/agent"
 	"github.com/zenodea/zaino/internal/llm"
 	"github.com/zenodea/zaino/internal/permission"
 	"github.com/zenodea/zaino/internal/provider"
@@ -93,6 +96,12 @@ func commandList() []command {
 			name:    "compact",
 			summary: "fold the conversation so far into a summary",
 			run:     cmdCompact,
+		},
+		{
+			name:    "limit",
+			arg:     "[tokens|off]",
+			summary: "stop the session when the context passes a ceiling",
+			run:     cmdLimit,
 		},
 		{
 			name:    "usage",
@@ -300,34 +309,22 @@ func whatGoes(m *Model) string {
 
 func cmdModel(m *Model, arg string) tea.Cmd {
 	if arg == "" {
-		known := m.knownModels()
-		if len(known) == 0 {
+		// Nothing compiled in — OpenRouter fronts hundreds — so ask the API
+		// and open the list once it answers.
+		if len(m.knownModels()) == 0 {
+			if cmd := fetchModels(m.agent.Provider); cmd != nil {
+				m.awaitingModels = true
+				m.notice("asking %s for its models…", m.provider)
+				return cmd
+			}
 			m.notice("model: %s\n%s does not list its models — pass one to /model",
 				m.modelName(), m.provider)
 			return nil
 		}
-
-		options := []choice{{
-			label: "provider default", value: "",
-			detail: m.agent.Provider.DefaultModel(),
-			body:   []string{hintStyle.Render("Whatever " + m.provider + " picks for itself, which follows their default")},
-		}}
-		for _, id := range known {
-			options = append(options, choice{label: id, value: id, body: []string{
-				keyed("provider", m.provider),
-				keyed("effort", orDefault(m.agent.Effort, "provider default")),
-				"",
-				hintStyle.Render("Changing model keeps the conversation; only what answers it changes."),
-			}})
-		}
-		return m.ask(chooser{title: "model · " + m.provider, options: options, current: m.agent.Model,
-			apply: func(m *Model, picked choice) {
-				m.agent.Model = picked.value
-				m.lastModel = ""
-				m.record(session.Model(m.provider, picked.value))
-				m.notice("model → %s", m.modelName())
-			}})
+		// Open on what is known now, and refresh from the API behind it.
+		return tea.Batch(m.openModelChooser(), fetchModels(m.agent.Provider))
 	}
+
 	m.agent.Model = arg
 	m.lastModel = "" // the header prefers what the last turn reported
 	m.record(session.Model(m.provider, arg))
@@ -335,13 +332,42 @@ func cmdModel(m *Model, arg string) tea.Cmd {
 	return nil
 }
 
+func (m *Model) openModelChooser() tea.Cmd {
+	options := []choice{{
+		label: "provider default", value: "",
+		detail: m.agent.Provider.DefaultModel(),
+		body:   []string{hintStyle.Render("Whatever " + m.provider + " picks for itself, which follows their default")},
+	}}
+	for _, id := range m.knownModels() {
+		options = append(options, choice{label: id, value: id, body: []string{
+			keyed("provider", m.provider),
+			keyed("effort", orDefault(m.agent.Effort, "provider default")),
+			"",
+			hintStyle.Render("Changing model keeps the conversation; only what answers it changes."),
+		}})
+	}
+	return m.ask(chooser{title: "model · " + m.provider, options: options, current: m.agent.Model,
+		apply: func(m *Model, picked choice) {
+			m.agent.Model = picked.value
+			m.lastModel = ""
+			m.record(session.Model(m.provider, picked.value))
+			m.notice("model → %s", m.modelName())
+		}})
+}
+
 func cmdProvider(m *Model, arg string) tea.Cmd {
 	if arg == "" {
 		var options []choice
 		for _, name := range provider.Available() {
-			detail, body := "credentials found", []string{
+			detail, body := credentialState(name), []string{
 				hintStyle.Render("Switching clears the context. A model id, thinking signatures"),
 				hintStyle.Render("and tool ids mean nothing on the other side."),
+			}
+			if !provider.HasCredentials(name) {
+				body = []string{
+					hintStyle.Render("Nothing here can reach " + name + " yet."),
+					hintStyle.Render("Choosing it opens the ways of setting it up."),
+				}
 			}
 			if name == m.provider {
 				detail, body = "in use", []string{
@@ -359,6 +385,11 @@ func cmdProvider(m *Model, arg string) tea.Cmd {
 
 	backend, err := provider.New(arg)
 	if err != nil {
+		// Not a dead end: offer the ways of authenticating instead of just
+		// reporting that there is no key.
+		if slices.Contains(provider.Available(), arg) {
+			return m.setUpProvider(arg)
+		}
 		m.push(entry{kind: entryError, text: err.Error()})
 		return nil
 	}
@@ -396,7 +427,7 @@ func cmdEffort(m *Model, arg string) tea.Cmd {
 				label: level, value: level, level: i + 1, detail: effortDetail[level],
 			})
 		}
-		if m.provider != "anthropic" {
+		if m.provider == "gemini" {
 			options[0].detail = m.provider + " ignores effort"
 		}
 		return m.ask(chooser{title: "effort · how hard the model works before answering",
@@ -667,17 +698,63 @@ func cmdCompact(m *Model, arg string) tea.Cmd {
 	return m.spinner.Tick
 }
 
+func cmdLimit(m *Model, arg string) tea.Cmd {
+	if arg == "" {
+		return m.ask(chooser{title: "limit · how much context this session may reach", current: limitValue(m.agent.MaxContext),
+			options: []choice{
+				{label: "off", value: "off", detail: "no ceiling", body: []string{
+					hintStyle.Render("The window still folds on its own once it fills."),
+				}},
+				{label: "100k", value: "100000", detail: "stop at 100,000 tokens", body: limitBody(m, 100_000)},
+				{label: "200k", value: "200000", detail: "stop at 200,000 tokens", body: limitBody(m, 200_000)},
+				{label: "500k", value: "500000", detail: "stop at 500,000 tokens", body: limitBody(m, 500_000)},
+			},
+			apply: func(m *Model, picked choice) { cmdLimit(m, picked.value) }})
+	}
+
+	limit, err := agent.ParseTokens(arg)
+	if err != nil {
+		m.push(entry{kind: entryError, text: fmt.Sprintf("usage: /limit [tokens|off], got %q", arg)})
+		return nil
+	}
+
+	m.agent.MaxContext = limit
+	m.record(session.Limit(limit))
+	if limit == 0 {
+		m.notice("limit → off")
+		return nil
+	}
+	m.notice("limit → %s · the turn that would pass it stops instead", humanTokens(limit))
+	return nil
+}
+
+func limitValue(limit int) string {
+	if limit == 0 {
+		return "off"
+	}
+	return strconv.Itoa(limit)
+}
+
+func limitBody(m *Model, limit int) []string {
+	body := []string{keyed("now", humanTokens(m.agent.Used())+" in context")}
+	if m.agent.Used() > limit {
+		body = append(body, keyed("effect", "the next turn stops straight away"))
+	}
+	return append(body, "",
+		hintStyle.Render("The turn is held before it is sent, and ⏎ sends it anyway."))
+}
+
 func cmdUsage(m *Model, _ string) tea.Cmd {
 	u := m.sessionUsage
 	width := min(max(m.contentWidth()-34, 12), 40)
 
 	lines := []string{}
-	if window := m.agent.Window(); window > 0 {
+	if ceiling := m.agent.Ceiling(); ceiling > 0 {
 		used := m.agent.Used()
 		lines = append(lines,
-			bar("context", used, window, width, contextHeat(used, window))+
-				metaStyle.Render(" of "+humanTokens(window)),
-			hintStyle.Render(pad("", 13)+contextNote(used, window)),
+			bar("context", used, ceiling, width, contextHeat(used, ceiling))+
+				metaStyle.Render(" of "+humanTokens(ceiling)),
+			hintStyle.Render(pad("", 13)+m.ceilingNote(used, ceiling)),
 			"")
 	}
 
@@ -709,6 +786,17 @@ func contextHeat(used, window int) lipgloss.Style {
 		return meterHeat[3]
 	}
 	return meterHeat[1]
+}
+
+// What happens when the bar fills depends on which bound is nearer.
+func (m *Model) ceilingNote(used, ceiling int) string {
+	if ceiling == m.agent.MaxContext && m.agent.MaxContext > 0 {
+		if used*100/max(ceiling, 1) > 85 {
+			return "the turn that passes " + humanTokens(ceiling) + " stops before it is sent"
+		}
+		return fmt.Sprintf("%d%% of the %s limit", used*100/max(ceiling, 1), humanTokens(ceiling))
+	}
+	return contextNote(used, ceiling)
 }
 
 func contextNote(used, window int) string {
@@ -761,14 +849,6 @@ func (m *Model) modelName() string {
 	default:
 		return "unknown"
 	}
-}
-
-func (m *Model) knownModels() []string {
-	lister, ok := m.agent.Provider.(llm.ModelLister)
-	if !ok {
-		return nil
-	}
-	return lister.Models()
 }
 
 // Asked of a real policy rather than written down, so the grid cannot claim

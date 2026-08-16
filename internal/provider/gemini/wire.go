@@ -62,6 +62,10 @@ type generationConfig struct {
 }
 
 type generateRequest struct {
+	// Only :countTokens wants it named inside the body; :streamGenerateContent
+	// carries the model in its path.
+	Model string `json:"model,omitempty"`
+
 	Contents          []content         `json:"contents"`
 	SystemInstruction *content          `json:"systemInstruction,omitempty"`
 	Tools             []toolSet         `json:"tools,omitempty"`
@@ -98,6 +102,13 @@ type generateResponse struct {
 	} `json:"promptFeedback"`
 	ModelVersion string `json:"modelVersion"`
 	ResponseID   string `json:"responseId"`
+}
+
+// The bare form of :countTokens takes contents alone, which would leave the
+// system instruction and the tool declarations out of the count; wrapping the
+// whole request counts what will actually be sent.
+type countRequest struct {
+	GenerateContentRequest generateRequest `json:"generateContentRequest"`
 }
 
 func buildRequest(req llm.Request, defaultMaxTokens int) (generateRequest, error) {

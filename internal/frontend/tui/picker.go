@@ -18,6 +18,12 @@ type picker struct {
 	open   bool
 	items  []session.Summary
 	cursor int
+
+	// Where the bar is drawn and where it is heading, so it walks between
+	// rows like the one in the transcript rather than jumping.
+	barAt int
+	barTo int
+	trail map[int]int
 }
 
 func (m *Model) openPicker() {
@@ -38,13 +44,17 @@ func (m *Model) openPicker() {
 
 	slices.Reverse(items)
 
-	m.picker = picker{open: true, items: items, cursor: len(items) - 1}
+	m.picker = picker{open: true, items: items, cursor: len(items) - 1, barAt: -1, barTo: -1}
 	for i, s := range items {
 		if s.ID == m.sessionID() {
 			m.picker.cursor = i
 			break
 		}
 	}
+	// Coming in from the composer the bar has nowhere to travel from, so it
+	// simply appears where you land.
+	_, cursor := m.pickerWindow(m.pickerRows())
+	m.picker.barAt, m.picker.barTo = cursor, cursor
 	m.syncViewport()
 }
 
@@ -85,6 +95,7 @@ func (m *Model) movePicker(delta int) {
 		return
 	}
 	m.picker.cursor = min(max(m.picker.cursor+delta, 0), n-1)
+	m.aimPickerBar()
 	m.syncViewport()
 }
 
@@ -164,9 +175,9 @@ func (m *Model) pickerView() string {
 	lines = append(lines, "")
 
 	for i, s := range items {
-		marker, style := " ", metaStyle
+		marker, style := m.pickerBar(i), metaStyle
 		if i == cursor {
-			marker, style = "›", menuPickStyle
+			style = menuPickStyle
 		}
 		here := "  "
 		if s.ID == m.sessionID() {
@@ -181,8 +192,7 @@ func (m *Model) pickerView() string {
 		}
 		room := max(m.contentWidth()-lipgloss.Width(left)-4, 12)
 
-		lines = append(lines,
-			userMarker.Render(marker)+" "+style.Render(left+truncate(preview, room)))
+		lines = append(lines, marker+" "+style.Render(left+truncate(preview, room)))
 	}
 
 	if pad := m.viewport.Height - len(lines); pad > 0 {
@@ -217,4 +227,64 @@ func when(t time.Time) string {
 	default:
 		return t.Format("2006-01-02 15:04")
 	}
+}
+
+// The picker's bar is the transcript's, so moving through saved sessions
+// reads the same as moving through what was said.
+func (m *Model) pickerBar(row int) string {
+	switch {
+	case row == m.picker.barAt:
+		return cursorBar()
+	}
+	if life, ok := m.picker.trail[row]; ok {
+		return trailBar((life + framesPerShade - 1) / framesPerShade)
+	}
+	return noBar()
+}
+
+func (m *Model) aimPickerBar() tea.Cmd {
+	_, cursor := m.pickerWindow(m.pickerRows())
+	m.picker.barTo = cursor
+	if !m.motion.on {
+		m.picker.barAt = cursor
+		return nil
+	}
+	return m.animate()
+}
+
+// advancePickerBar walks the bar one row per frame and leaves a fading trail
+// behind it.
+func (m *Model) advancePickerBar() bool {
+	if !m.picker.open || m.picker.barAt == m.picker.barTo {
+		return m.fadePickerTrail()
+	}
+
+	m.leavePickerTrail(m.picker.barAt)
+	if m.picker.barAt < m.picker.barTo {
+		m.picker.barAt++
+	} else {
+		m.picker.barAt--
+	}
+	return true
+}
+
+func (m *Model) leavePickerTrail(row int) {
+	if m.picker.trail == nil {
+		m.picker.trail = map[int]int{}
+	}
+	m.picker.trail[row] = trailLife()
+}
+
+func (m *Model) fadePickerTrail() bool {
+	if len(m.picker.trail) == 0 {
+		return false
+	}
+	for row, life := range m.picker.trail {
+		if life <= 1 {
+			delete(m.picker.trail, row)
+			continue
+		}
+		m.picker.trail[row] = life - 1
+	}
+	return true
 }

@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"errors"
 	"flag"
 	"fmt"
 	"net/http"
@@ -18,6 +17,7 @@ import (
 	"github.com/zenodea/zaino/internal/mcp"
 	"github.com/zenodea/zaino/internal/permission"
 	"github.com/zenodea/zaino/internal/provider"
+	"github.com/zenodea/zaino/internal/store/credentials"
 	"github.com/zenodea/zaino/internal/store/recall"
 	"github.com/zenodea/zaino/internal/store/session"
 	"github.com/zenodea/zaino/internal/store/wirelog"
@@ -38,7 +38,7 @@ func run() error {
 			"model provider: auto|"+strings.Join(provider.Available(), "|"))
 		model     = flag.String("model", "", "model id (default: the provider's own)")
 		maxTokens = flag.Int("max-tokens", agent.DefaultMaxTokens, "max output tokens per turn")
-		effort    = flag.String("effort", "", "output effort: low|medium|high|xhigh|max (Anthropic only)")
+		effort    = flag.String("effort", "", "output effort: low|medium|high|xhigh|max (not all providers)")
 		system    = flag.String("system", "", "system prompt")
 		showThink = flag.Bool("thinking", false, "request and display model reasoning")
 		plain     = flag.Bool("plain", false, "line-based REPL instead of the full-screen UI")
@@ -59,6 +59,9 @@ func run() error {
 			"tokens the model can hold before older messages are folded into a summary")
 		noCompact = flag.Bool("no-compact", false, "never summarise, and fail when the window fills")
 
+		maxContext = flag.String("max-context", "off",
+			"stop the session when the context passes this many tokens: 200k, 200000, off")
+
 		vimKeys = flag.Bool("vim", true, "modal editing in the composer; -vim=false for plain input")
 		mouse   = flag.Bool("mouse", false,
 			"scroll with the wheel, at the cost of selecting text with the mouse")
@@ -76,9 +79,13 @@ func run() error {
 	given := map[string]bool{}
 	flag.Visit(func(f *flag.Flag) { given[f.Name] = true })
 
+	contextLimit, err := agent.ParseTokens(*maxContext)
+	if err != nil {
+		return fmt.Errorf("-max-context: %w", err)
+	}
+
 	var wire *wirelog.Log
 	if *logPath != "" {
-		var err error
 		if wire, err = wirelog.Open(*logPath); err != nil {
 			return err
 		}
@@ -101,6 +108,8 @@ func run() error {
 		restored = session.Build(entries)
 	}
 
+	openCredentials()
+
 	wanted := *providerName
 	if !given["provider"] && !given["r"] && restored.Provider != "" {
 		wanted = restored.Provider
@@ -112,7 +121,11 @@ func run() error {
 		backend, err = newProvider(*providerName, wire)
 	}
 	if err != nil {
-		return explainCredentials(err)
+		// Starting anyway beats dying before the UI exists: /provider can
+		// set a key up from inside, and everything else still works. The
+		// frontend says so in its own words — anything printed here is wiped
+		// by the full-screen UI a moment later.
+		backend = provider.None(err)
 	}
 
 	gate, tools, err := openToolbox(*permMode, *allowOutside, *noTools, *toolNames, *excludeTools)
@@ -140,6 +153,7 @@ func run() error {
 	if !*noCompact {
 		ag.Compaction = &agent.Compaction{Window: *contextWindow}
 	}
+	ag.MaxContext = contextLimit
 	if !*noTools && !*noTask {
 		ag.Tools = append(ag.Tools, agent.TaskTool(ag))
 	}
@@ -315,6 +329,9 @@ func applyRestored(ag *agent.Agent, c session.Context, given map[string]bool) {
 	if !given["thinking"] && c.Thinking != nil {
 		ag.Thinking.Show = *c.Thinking
 	}
+	if !given["max-context"] && c.Limit != nil {
+		ag.MaxContext = *c.Limit
+	}
 }
 
 func recordSettings(rec *session.Recorder, ag *agent.Agent, providerName string, c session.Context) error {
@@ -342,7 +359,25 @@ func recordSettings(rec *session.Recorder, ag *agent.Agent, providerName string,
 			return err
 		}
 	}
+	if c.Limit == nil && ag.MaxContext == 0 {
+		return nil
+	}
+	if c.Limit == nil || *c.Limit != ag.MaxContext {
+		if err := rec.Append(session.Limit(ag.MaxContext)); err != nil {
+			return err
+		}
+	}
 	return nil
+}
+
+func openCredentials() *credentials.Store {
+	store, err := credentials.Open()
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "zaino: credentials unavailable:", err)
+		return nil
+	}
+	provider.SetStore(store)
+	return store
 }
 
 func newProvider(name string, wire *wirelog.Log) (llm.Provider, error) {
@@ -351,18 +386,6 @@ func newProvider(name string, wire *wirelog.Log) (llm.Provider, error) {
 	}
 	client := &http.Client{Transport: wire.Transport(httpx.NewTransport())}
 	return provider.New(name, provider.WithHTTPClient(client))
-}
-
-func explainCredentials(err error) error {
-	if !errors.Is(err, provider.ErrNoCredentials) {
-		return err
-	}
-	return fmt.Errorf(`%w
-
-  Anthropic:  export ANTHROPIC_API_KEY=sk-ant-...     (console.anthropic.com)
-  Gemini:     export GEMINI_API_KEY=...               (aistudio.google.com/apikey)
-
-Then pick one with -provider, or leave it on auto`, err)
 }
 
 func isTerminal(f *os.File) bool {

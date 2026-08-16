@@ -14,6 +14,7 @@ const (
 	KindSystem   Kind = "system"
 	KindThinking Kind = "thinking"
 	KindEffort   Kind = "effort"
+	KindLimit    Kind = "limit"
 	KindClear    Kind = "clear"
 
 	KindPermission Kind = "permission"
@@ -31,6 +32,10 @@ type body struct {
 	Text     string `json:"text,omitempty"`
 	Level    string `json:"level,omitempty"`
 	On       *bool  `json:"on,omitempty"`
+
+	// A pointer because a ceiling of none is a setting like any other, and
+	// zero would read as never having been set.
+	Tokens *int `json:"tokens,omitempty"`
 
 	Tool     string `json:"tool,omitempty"`
 	Action   string `json:"action,omitempty"`
@@ -69,6 +74,10 @@ func Thinking(on bool) New {
 
 func Effort(level string) New {
 	return New{Type: KindEffort, body: body{Level: level}}
+}
+
+func Limit(tokens int) New {
+	return New{Type: KindLimit, body: body{Tokens: &tokens}}
 }
 
 func Clear() New {

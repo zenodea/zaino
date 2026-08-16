@@ -29,17 +29,46 @@ type motion struct {
 
 const barSteps = 6
 
-// Starts the frame loop if it is not already running. Everything that animates
-// shares one tick, so two things moving at once do not run at double rate.
-func (m *Model) animate() tea.Cmd {
-	if !m.motion.on || m.motion.active {
-		return nil
+// Something has started moving. The loop is not armed here: Update arms it
+// after every message, so an animation cannot be lost by a caller that drops
+// the command it was handed.
+func (m *Model) animate() tea.Cmd { return nil }
+
+// withFrame keeps one tick in flight for as long as anything is moving.
+// Everything that animates shares it, so two things at once do not run at
+// double rate.
+func (m *Model) withFrame(cmd tea.Cmd) tea.Cmd {
+	if !m.motion.on || m.motion.active || !m.animating() {
+		return cmd
 	}
 	m.motion.active = true
-	return frame()
+	if cmd == nil {
+		return frame()
+	}
+	return tea.Batch(cmd, frame())
 }
 
-const framesPerShade = 5
+// animating asks every part that can move whether it still is.
+func (m *Model) animating() bool {
+	switch {
+	case m.motion.barAt != m.motion.barTo && m.motion.barAt >= 0:
+	case m.motion.scrolling, m.motion.landing > 0, len(m.motion.trail) > 0:
+	case m.chooser.open && (m.chooser.barAt != m.chooser.barTo ||
+		len(m.chooser.trail) > 0 || m.chooser.fill < m.fillTarget()):
+	case m.menu.open && (m.menu.barAt != m.menu.barTo || len(m.menu.trail) > 0):
+	case m.picker.open && (m.picker.barAt != m.picker.barTo || len(m.picker.trail) > 0):
+	default:
+		return false
+	}
+	return true
+}
+
+const framesPerShade = 6
+
+// What a mark loses for each line the bar puts between them. Small, so a mark
+// fades mostly on the clock and is seen to slim where it was left; without any
+// of it a long jump would lay one flat block of trail in a single frame.
+const agePerLine = 2
 
 func trailLife() int { return len(trail) * framesPerShade }
 
@@ -100,8 +129,9 @@ func frame() tea.Cmd {
 	return tea.Tick(time.Second/framesPerSecond, func(time.Time) tea.Msg { return frameMsg{} })
 }
 
-// Each step ages what is already behind you by a whole shade, so the tail
-// tapers by distance rather than by clock.
+// A mark starts fading the moment it is left, rather than being held at full
+// width until the bar stops. Distance still counts for something, so a jump of
+// forty lines tapers instead of landing as one solid block.
 func (m *Model) leaveTrail(from int) {
 	if !m.motion.on || from < 0 {
 		return
@@ -111,7 +141,7 @@ func (m *Model) leaveTrail(from int) {
 	}
 
 	for i, life := range m.motion.trail {
-		if life -= framesPerShade; life <= 0 {
+		if life -= agePerLine; life <= 0 {
 			delete(m.motion.trail, i)
 			continue
 		}
@@ -124,6 +154,12 @@ func (m *Model) step() tea.Cmd {
 	working := m.fillMeter()
 
 	if m.advanceTranscriptBar() {
+		working = true
+	}
+	if m.advancePickerBar() {
+		working = true
+	}
+	if m.advanceMenuBar() {
 		working = true
 	}
 	if m.motion.landing > 0 {

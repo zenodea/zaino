@@ -104,7 +104,7 @@ func Run(ag *agent.Agent, o Options) error {
 			}
 
 			defer fmt.Fprintln(os.Stderr)
-			messages = runTurn(ag, interrupts, messages, strings.TrimSpace(line), stdout, o.Recorder)
+			messages = runTurn(ag, interrupts, messages, strings.TrimSpace(line), stdout, o.Recorder, nil)
 			return nil
 		}
 		if err != nil {
@@ -125,35 +125,72 @@ func Run(ag *agent.Agent, o Options) error {
 			}
 			continue
 		}
-		messages = runTurn(ag, interrupts, messages, prompt, stdout, o.Recorder)
+		asker := in
+		if !o.Interactive {
+			asker = nil
+		}
+		messages = runTurn(ag, interrupts, messages, prompt, stdout, o.Recorder, asker)
 	}
 }
 
 func runTurn(ag *agent.Agent, interrupts *interrupts, messages []llm.Message,
-	prompt string, stdout *bufio.Writer, rec *session.Recorder) []llm.Message {
+	prompt string, stdout *bufio.Writer, rec *session.Recorder, in *bufio.Reader) []llm.Message {
 	messages = append(messages, llm.UserText(prompt))
 
-	ctx, cancel := context.WithCancel(context.Background())
-	interrupts.bind(cancel)
-	messages, err := ag.Run(ctx, messages)
-	interrupts.unbind()
-	cancel()
+	for {
+		ctx, cancel := context.WithCancel(context.Background())
+		interrupts.bind(cancel)
+		updated, err := ag.Run(ctx, messages)
+		interrupts.unbind()
+		cancel()
+		messages = updated
 
-	if saveErr := rec.Messages(messages); saveErr != nil {
-		fmt.Fprintln(os.Stderr, "\x1b[31msession not being saved: "+saveErr.Error()+"\x1b[0m")
-	}
+		if saveErr := rec.Messages(messages); saveErr != nil {
+			fmt.Fprintln(os.Stderr, "\x1b[31msession not being saved: "+saveErr.Error()+"\x1b[0m")
+		}
 
-	stdout.Flush()
-	fmt.Fprintln(os.Stderr)
+		stdout.Flush()
+		fmt.Fprintln(os.Stderr)
 
-	if err != nil {
-		if errors.Is(err, context.Canceled) {
+		var overLimit *agent.ContextLimitError
+		switch {
+		case err == nil:
+		case errors.As(err, &overLimit):
+			if !askPastLimit(overLimit, in) {
+				return messages
+			}
+			ag.AllowOnce()
+			continue
+		case errors.Is(err, context.Canceled):
 			fmt.Fprintln(os.Stderr, "\x1b[2minterrupted\x1b[0m")
-		} else {
+		default:
 			fmt.Fprintln(os.Stderr, "\x1b[31m"+err.Error()+"\x1b[0m")
 		}
+		return messages
 	}
-	return messages
+}
+
+// Nothing was sent, so the conversation is still whole either way; the only
+// question is whether to go over. Without a terminal to ask, it does not.
+func askPastLimit(err *agent.ContextLimitError, in *bufio.Reader) bool {
+	about := "about "
+	if err.Exact {
+		about = ""
+	}
+	fmt.Fprintf(os.Stderr, "\x1b[31m⚠ context limit · %s%d tokens of %d\x1b[0m\n",
+		about, err.Used, err.Limit)
+	if in == nil {
+		fmt.Fprintln(os.Stderr, "\x1b[2mthe turn was not sent\x1b[0m")
+		return false
+	}
+
+	fmt.Fprintf(os.Stderr, "\x1b[2m⏎ send it anyway · anything else leaves it here\x1b[0m\n\x1b[1m› \x1b[0m")
+	line, readErr := in.ReadString('\n')
+	if readErr != nil || strings.TrimSpace(line) != "" {
+		fmt.Fprintln(os.Stderr, "\x1b[2mthe turn was not sent · /limit raises the ceiling, /compact makes room\x1b[0m")
+		return false
+	}
+	return true
 }
 
 func compactJSON(raw json.RawMessage) string {

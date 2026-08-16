@@ -3,6 +3,7 @@ package tui
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -378,14 +379,24 @@ func TestMenuStaysShutMidTurn(t *testing.T) {
 	}
 }
 
-func TestMenuTakesRoomFromTheViewport(t *testing.T) {
+// The menu floats over the transcript: opening it must not resize or scroll
+// what is underneath.
+func TestMenuFloatsOverTheViewport(t *testing.T) {
 	m := newTestModel(t, 80, 24)
-	tall := m.viewport.Height
+	for i := range 40 {
+		m.push(entry{kind: entryUser, text: fmt.Sprintf("line %d", i)})
+	}
+	tall, offset := m.viewport.Height, m.viewport.YOffset
 
 	typeLine(m, "/")
-	short := m.viewport.Height
-	if short >= tall {
-		t.Errorf("viewport should shrink for the panel: %d then %d", tall, short)
+	if !m.menu.open {
+		t.Fatal("the menu did not open")
+	}
+	if m.viewport.Height != tall {
+		t.Errorf("viewport resized for the panel: %d then %d", tall, m.viewport.Height)
+	}
+	if m.viewport.YOffset != offset {
+		t.Errorf("the transcript scrolled under the panel: %d then %d", offset, m.viewport.YOffset)
 	}
 	if got := strings.Count(m.View(), "\n") + 1; got > 24 {
 		t.Errorf("view is %d lines with the menu open, want <= 24", got)
@@ -393,6 +404,138 @@ func TestMenuTakesRoomFromTheViewport(t *testing.T) {
 
 	typeLine(m, "hello")
 	if m.viewport.Height != tall {
-		t.Errorf("viewport should return to %d, got %d", tall, m.viewport.Height)
+		t.Errorf("viewport should still be %d, got %d", tall, m.viewport.Height)
+	}
+}
+
+func TestTheMenuIsDrawnOverTheTranscript(t *testing.T) {
+	m := newTestModel(t, 80, 24)
+	for i := range 40 {
+		m.push(entry{kind: entryUser, text: fmt.Sprintf("unmistakable-%d", i)})
+	}
+
+	before := strings.Count(m.View(), "\n")
+	typeLine(m, "/")
+	after := strings.Count(m.View(), "\n")
+
+	if before != after {
+		t.Errorf("the view changed height: %d then %d", before, after)
+	}
+	if !strings.Contains(m.View(), "/help") {
+		t.Error("the menu is not on screen")
+	}
+}
+
+// The command menu uses the same bar as the transcript, not a static caret.
+func TestTheMenuDrawsTheCursorBar(t *testing.T) {
+	m := newTestModel(t, 80, 24)
+	typeLine(m, "/")
+
+	view := m.menuView()
+	if strings.Contains(view, "›") {
+		t.Errorf("the menu still uses a caret:\n%s", view)
+	}
+	if strings.Count(view, "▌") != 1 {
+		t.Errorf("got %d bars, want exactly one:\n%s", strings.Count(view, "▌"), view)
+	}
+}
+
+func TestTheMenuBarWalksBetweenRows(t *testing.T) {
+	m := newTestModel(t, 80, 40)
+	m.UseAnimation(true)
+	typeLine(m, "/")
+
+	if len(m.menu.matches) < 3 {
+		t.Skip("not enough commands to travel between")
+	}
+	start := m.menu.barAt
+	m.moveMenu(2)
+
+	if m.menu.barTo == start {
+		t.Fatalf("the bar was not aimed anywhere: %d", m.menu.barTo)
+	}
+	if m.menu.barAt != start {
+		t.Error("the bar jumped instead of walking")
+	}
+
+	for range 100 {
+		if m.menu.barAt == m.menu.barTo {
+			break
+		}
+		m.advanceMenuBar()
+	}
+	if m.menu.barAt != m.menu.barTo {
+		t.Errorf("the bar never arrived: %d vs %d", m.menu.barAt, m.menu.barTo)
+	}
+	if len(m.menu.trail) == 0 {
+		t.Error("the bar left no trail")
+	}
+}
+
+func TestTheMenuBarLandsAtOnceWithoutAnimation(t *testing.T) {
+	m := newTestModel(t, 80, 40)
+	m.UseAnimation(false)
+	typeLine(m, "/")
+
+	m.moveMenu(1)
+	if m.menu.barAt != m.menu.barTo {
+		t.Errorf("bar at %d, want %d straight away", m.menu.barAt, m.menu.barTo)
+	}
+}
+
+// Typing another letter narrows the list; the bar must not teleport for it.
+func TestNarrowingKeepsTheBar(t *testing.T) {
+	m := newTestModel(t, 80, 40)
+	m.UseAnimation(true)
+	typeLine(m, "/")
+	m.moveMenu(2)
+	for range 100 {
+		if m.menu.barAt == m.menu.barTo {
+			break
+		}
+		m.advanceMenuBar()
+	}
+	settled := m.menu.barAt
+
+	typeLine(m, "")
+	m.refreshMenu()
+	if m.menu.open && m.menu.barAt != settled && m.menu.barTo == settled {
+		t.Errorf("the bar jumped to %d on a refresh, want it to walk from %d", m.menu.barAt, settled)
+	}
+}
+
+// Driven the way the runtime drives it: keys in through Update, frames out.
+func TestTheMenuBarMovesThroughUpdate(t *testing.T) {
+	m := newTestModel(t, 80, 40)
+	m.UseAnimation(true)
+
+	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'/'}})
+	if !m.menu.open {
+		t.Fatal("the menu did not open")
+	}
+	if len(m.menu.matches) < 3 {
+		t.Skip("not enough commands to travel between")
+	}
+	start := m.menu.barAt
+
+	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyDown})
+	if cmd == nil {
+		t.Fatal("moving in the menu scheduled no frame")
+	}
+
+	for range 200 {
+		if m.menu.barAt == m.menu.barTo {
+			break
+		}
+		m.Update(frameMsg{})
+	}
+	if m.menu.barAt == start {
+		t.Errorf("the bar never left %d", start)
+	}
+	if m.menu.barAt != m.menu.barTo {
+		t.Errorf("the bar stalled at %d, aiming for %d", m.menu.barAt, m.menu.barTo)
+	}
+	if !strings.Contains(m.menuView(), "▌") {
+		t.Error("no cursor bar in the rendered menu")
 	}
 }

@@ -116,6 +116,10 @@ func TestAnimationEasesToTheSameOffset(t *testing.T) {
 		t.Error("the animated view arrived instantly; nothing was eased")
 	}
 
+	// Update arms the loop after every message; these tests move the cursor
+	// directly, so they arm it the same way.
+	eased.withFrame(nil)
+
 	frames := 0
 	for eased.motion.active {
 		if frames++; frames > 200 {
@@ -134,6 +138,8 @@ func TestAnimationDecelerates(t *testing.T) {
 	for range 25 {
 		m.moveCursor(-1)
 	}
+
+	m.withFrame(nil)
 
 	var steps []int
 	previous := m.viewport.YOffset
@@ -220,5 +226,213 @@ func TestTheTailIsNeverMistakenForTheCursor(t *testing.T) {
 		if _, cmd := m.Update(frameMsg{}); cmd == nil {
 			break
 		}
+	}
+}
+
+// The loop used to be armed by whoever started an animation, so a caller that
+// dropped the command it was handed left the frame loop dead for good.
+func TestADroppedCommandDoesNotKillTheLoop(t *testing.T) {
+	m := longChat(t, 30)
+	m.UseAnimation(true)
+
+	// toggleSelected returns a bool and throws its animation command away.
+	m.moveCursor(-1)
+	m.withFrame(nil)
+	for m.motion.active {
+		m.step()
+	}
+	m.toggleSelected()
+
+	m.moveCursor(-1)
+	if _, cmd := m.Update(tea.KeyMsg{Type: tea.KeyCtrlK}); cmd == nil && !m.motion.active {
+		t.Fatal("the frame loop never restarted")
+	}
+
+	frames := 0
+	for m.motion.active && frames < 300 {
+		m.step()
+		frames++
+	}
+	if frames == 0 {
+		t.Error("nothing animated after a command was dropped")
+	}
+}
+
+func TestTheLoopArmsItselfThroughUpdate(t *testing.T) {
+	m := longChat(t, 30)
+	m.UseAnimation(true)
+
+	if m.motion.active {
+		t.Fatal("the loop is running before anything moved")
+	}
+	m.Update(tea.KeyMsg{Type: tea.KeyCtrlK})
+
+	if !m.motion.active {
+		t.Error("a key that moves the cursor did not arm the loop")
+	}
+}
+
+// One tick at a time, however many things are moving.
+func TestOnlyOneFrameIsEverInFlight(t *testing.T) {
+	m := longChat(t, 30)
+	m.UseAnimation(true)
+	m.moveCursor(-5)
+
+	first := m.withFrame(nil)
+	second := m.withFrame(nil)
+	if first == nil {
+		t.Fatal("the first arm produced no tick")
+	}
+	if second != nil {
+		t.Error("a second tick was scheduled while one was already in flight")
+	}
+}
+
+func TestNothingAnimatesWhenAnimationIsOff(t *testing.T) {
+	m := longChat(t, 30)
+	m.UseAnimation(false)
+	m.moveCursor(-5)
+
+	if cmd := m.withFrame(nil); cmd != nil {
+		t.Error("a tick was scheduled with animation off")
+	}
+	if m.motion.active {
+		t.Error("the loop is marked running with animation off")
+	}
+}
+
+// shadeAt reports how wide the trail is at a line: 3 is freshest, 0 is gone.
+func shadeAt(m *Model, line int) int {
+	glyph := m.barForLine(line)
+	for i, t := range trail {
+		if strings.Contains(glyph, t.glyph) {
+			return len(trail) - i
+		}
+	}
+	return 0
+}
+
+// The trail used to be a rigid comb dragged along by the bar: every mark died
+// as fast as the bar moved, so nothing was seen to fade until it stopped.
+func TestTheTrailFadesWhileTheBarIsStillMoving(t *testing.T) {
+	m := longChat(t, 40)
+	m.UseAnimation(true)
+
+	m.moveCursor(-1)
+	m.withFrame(nil)
+	for m.motion.active {
+		m.step()
+	}
+
+	from := m.motion.barAt
+	m.moveCursor(-12)
+	m.withFrame(nil)
+	if m.motion.barAt == m.motion.barTo {
+		t.Skip("the move did not travel")
+	}
+
+	m.step()
+	first := shadeAt(m, from)
+	if first == 0 {
+		t.Fatalf("line %d was left with no mark at all", from)
+	}
+
+	faded := false
+	for range 40 {
+		if m.motion.barAt == m.motion.barTo {
+			break
+		}
+		m.step()
+		if shadeAt(m, from) < first {
+			faded = true
+			break
+		}
+	}
+	if !faded {
+		t.Errorf("the mark at line %d held shade %d for the whole journey", from, first)
+	}
+}
+
+func TestTheTrailDisappearsWhileTheBarIsStillMoving(t *testing.T) {
+	m := longChat(t, 60)
+	m.UseAnimation(true)
+
+	m.moveCursor(-1)
+	m.withFrame(nil)
+	for m.motion.active {
+		m.step()
+	}
+
+	from := m.motion.barAt
+	m.moveCursor(-30)
+	m.withFrame(nil)
+
+	for range 60 {
+		if m.motion.barAt == m.motion.barTo {
+			t.Skip("the bar arrived before the mark expired")
+		}
+		m.step()
+		if shadeAt(m, from) == 0 {
+			return
+		}
+	}
+	t.Errorf("the mark at line %d outlived the whole journey", from)
+}
+
+// However far it jumps, the tail stays a tail rather than painting the screen.
+func TestALongJumpLeavesABoundedTail(t *testing.T) {
+	m := longChat(t, 80)
+	m.UseAnimation(true)
+
+	m.moveCursor(-1)
+	m.withFrame(nil)
+	for m.motion.active {
+		m.step()
+	}
+
+	m.moveCursor(-50)
+	m.withFrame(nil)
+
+	worst := 0
+	for range 80 {
+		if !m.motion.active {
+			break
+		}
+		m.step()
+		worst = max(worst, len(m.motion.trail))
+	}
+	if worst == 0 {
+		t.Fatal("the jump left no trail at all")
+	}
+	if worst > 4*len(trail) {
+		t.Errorf("the tail grew to %d marks, want a tail and not a stripe", worst)
+	}
+}
+
+// A tail that is all one shade is a block, not a comet.
+func TestTheTailTapers(t *testing.T) {
+	m := longChat(t, 60)
+	m.UseAnimation(true)
+
+	m.moveCursor(-1)
+	m.withFrame(nil)
+	for m.motion.active {
+		m.step()
+	}
+
+	m.moveCursor(-30)
+	m.withFrame(nil)
+	for range 6 {
+		m.step()
+	}
+
+	shades := map[int]bool{}
+	for line := m.motion.barAt; line <= m.motion.barAt+80; line++ {
+		if s := shadeAt(m, line); s > 0 {
+			shades[s] = true
+		}
+	}
+	if len(shades) < 2 {
+		t.Errorf("the tail showed %d shade(s), want it to taper", len(shades))
 	}
 }

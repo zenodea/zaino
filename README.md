@@ -47,7 +47,7 @@ Flags: `-provider`, `-model`, `-max-tokens`, `-effort` (Anthropic only),
 `-system`, `-thinking`, `-plain`, `-v`, `-continue`/`-c`, `-resume`/`-r`,
 `-no-save`, `-log`, `-permission`, `-allow-outside`, `-tools`,
 `-exclude-tools`, `-no-tools`, `-no-subagents`, `-mcp`, `-no-mcp`, `-vim`,
-`-mouse`, `-animate`, `-context-window`, `-no-compact`.
+`-mouse`, `-animate`, `-context-window`, `-no-compact`, `-max-context`.
 
 Keys: `⏎` send, `⌥⏎` newline, `⌃j`/`⌃k` walk the chat, `↑`/`↓` earlier prompts,
 `⇧⇥` cycle permission mode, `PgUp`/`PgDn` and `⌃u`/`⌃d` scroll.
@@ -131,6 +131,7 @@ A line beginning with `/` acts on the session instead of going to the model:
     /permission [mode]   show or set when tools stop to ask  (/perm, /mode)
     /tools               list the tools the model has
     /compact             fold the conversation so far into a summary
+    /limit [tokens|off]  stop the session when the context passes a ceiling
     /vim [on|off]        modal editing in the composer
     /usage               token usage for this session
     /sessions            pick up an earlier conversation   (/resume)
@@ -255,6 +256,35 @@ Two details matter more than the summarising itself:
 The trigger uses what the provider counted for the last turn, not an estimate,
 so it is the real context size that decides. The estimate is only a stand-in
 before the first turn has come back.
+
+## The context limit
+
+Compaction keeps a session going. A limit stops it. `-max-context 200k`, or
+`/limit 200k` from inside, gives the session a ceiling: the turn that would
+carry the context past it is held before it is sent, and the conversation is
+left exactly as it was. `⏎` sends it anyway, `esc` leaves it there. Consent
+covers the run it was given for, not the session: the next turn asks again.
+
+The ceiling belongs to the session, not the process. It is written into the
+session log like the model or the system prompt, so `-c` or `-r` comes back to
+the one that session was running under; `-max-context` on the command line
+overrides it for that run, and `/limit` from inside changes it for good. A
+`/clear` does not lose it, and `/limit off` is a setting of its own rather than
+the absence of one.
+
+The two bounds are independent. Compaction still folds at its own window, so a
+ceiling below that window is what actually stops the session, and a ceiling
+above it will only be met once folding can no longer keep up.
+
+200k means 200k. Where the provider will count a request before it is sent —
+Anthropic's `count_tokens`, Gemini's `countTokens` — that count is what the
+ceiling is measured against, system prompt and tool schemas included. The
+count is not bought every turn: the last turn's own numbers give an exact
+baseline, and everything added since is priced at a token per byte, which no
+tokeniser can beat. While that bound stays under the ceiling there is nothing
+to ask about. Against a provider that cannot count, the limit falls back to the
+estimate and says so — the warning reads "about" and names where the number
+came from.
 
 ## Permission
 

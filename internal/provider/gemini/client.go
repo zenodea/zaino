@@ -85,6 +85,44 @@ func (c *Client) Models() []string {
 	return []string{Model25Pro, Model25Flash}
 }
 
+// CountTokens asks what the request would occupy before it is sent, which is
+// the only measure a hard context limit can honestly be enforced against.
+func (c *Client) CountTokens(ctx context.Context, req llm.Request) (int, error) {
+	wire, err := buildRequest(req, defaultMaxTokens)
+	if err != nil {
+		return 0, err
+	}
+
+	model := req.Model
+	if model == "" {
+		model = c.DefaultModel()
+	}
+	wire.Model = "models/" + model
+
+	body, err := json.Marshal(countRequest{GenerateContentRequest: wire})
+	if err != nil {
+		return 0, fmt.Errorf("gemini: encoding count request: %w", err)
+	}
+
+	endpoint := fmt.Sprintf("%s/models/%s:countTokens", c.baseURL, url.PathEscape(model))
+	resp, err := c.http.Post(ctx, endpoint, func(r *http.Request) {
+		r.Header.Set("x-goog-api-key", c.apiKey)
+		r.Header.Set("accept", "application/json")
+	}, body)
+	if err != nil {
+		return 0, err
+	}
+	defer resp.Body.Close()
+
+	var out struct {
+		TotalTokens int `json:"totalTokens"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		return 0, fmt.Errorf("gemini: decoding token count: %w", err)
+	}
+	return out.TotalTokens, nil
+}
+
 func (c *Client) Stream(ctx context.Context, req llm.Request) (llm.Stream, error) {
 	wire, err := buildRequest(req, defaultMaxTokens)
 	if err != nil {

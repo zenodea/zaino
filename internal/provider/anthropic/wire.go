@@ -7,9 +7,14 @@ import (
 )
 
 const (
-	ModelOpus5   = "claude-opus-5"
-	ModelSonnet5 = "claude-sonnet-5"
-	ModelHaiku45 = "claude-haiku-4-5"
+	ModelFable5   = "claude-fable-5"
+	ModelOpus5    = "claude-opus-5"
+	ModelOpus48   = "claude-opus-4-8"
+	ModelOpus47   = "claude-opus-4-7"
+	ModelOpus46   = "claude-opus-4-6"
+	ModelSonnet5  = "claude-sonnet-5"
+	ModelSonnet46 = "claude-sonnet-4-6"
+	ModelHaiku45  = "claude-haiku-4-5"
 )
 
 // Copy-on-write: the caller's history keeps the signature, in case the
@@ -80,6 +85,27 @@ type wireRequest struct {
 	Thinking     *wireThinking     `json:"thinking,omitempty"`
 	OutputConfig *wireOutputConfig `json:"output_config,omitempty"`
 	Stream       bool              `json:"stream"`
+}
+
+// /v1/messages/count_tokens rejects the parameters that shape the reply, so it
+// gets the same request with those left off.
+type wireCountRequest struct {
+	Model    string            `json:"model"`
+	Messages []llm.Message     `json:"messages"`
+	System   []wireSystemBlock `json:"system,omitempty"`
+	Tools    []wireTool        `json:"tools,omitempty"`
+	Thinking *wireThinking     `json:"thinking,omitempty"`
+}
+
+func buildCountRequest(req llm.Request, defaultModel string) wireCountRequest {
+	full := buildRequest(req, defaultModel)
+	return wireCountRequest{
+		Model:    full.Model,
+		Messages: full.Messages,
+		System:   full.System,
+		Tools:    full.Tools,
+		Thinking: full.Thinking,
+	}
 }
 
 func buildRequest(req llm.Request, defaultModel string) wireRequest {

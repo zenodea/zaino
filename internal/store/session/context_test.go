@@ -127,3 +127,45 @@ func TestStripProviderBlocks(t *testing.T) {
 		t.Errorf("assistant text = %q, want %q", kept[1].Text(), "hi")
 	}
 }
+
+func TestLimitIsRestoredAndSurvivesAClear(t *testing.T) {
+	c := build(t,
+		session.Limit(200_000),
+		session.Message(llm.UserText("a question"), nil),
+		session.Clear(),
+	)
+
+	if c.Limit == nil {
+		t.Fatal("the ceiling was lost with the conversation")
+	}
+	if *c.Limit != 200_000 {
+		t.Errorf("limit = %d, want 200000", *c.Limit)
+	}
+}
+
+func TestLastLimitWins(t *testing.T) {
+	c := build(t, session.Limit(200_000), session.Limit(500_000))
+
+	if c.Limit == nil || *c.Limit != 500_000 {
+		t.Errorf("limit = %v, want 500000", c.Limit)
+	}
+}
+
+// Turning it off is a setting, not the absence of one, so it has to read back
+// as a ceiling of none rather than as never having been set.
+func TestLimitOffIsRecordedAsSuch(t *testing.T) {
+	c := build(t, session.Limit(200_000), session.Limit(0))
+
+	if c.Limit == nil {
+		t.Fatal("limit = nil, want a recorded zero")
+	}
+	if *c.Limit != 0 {
+		t.Errorf("limit = %d, want 0", *c.Limit)
+	}
+}
+
+func TestNoLimitReadsBackAsUnset(t *testing.T) {
+	if c := build(t, session.Message(llm.UserText("hi"), nil)); c.Limit != nil {
+		t.Errorf("limit = %v, want nil when none was ever set", *c.Limit)
+	}
+}

@@ -228,21 +228,18 @@ func TestEscapeClearsAPendingOperatorBeforeStoppingTheTurn(t *testing.T) {
 	}
 }
 
-func TestViewportHeightTracksTheMenu(t *testing.T) {
+func TestViewportHeightIgnoresTheMenu(t *testing.T) {
 	m := quitModel(t)
 	tall := m.viewport.Height
 
 	typeLine(m, "/m")
-	if m.viewport.Height >= tall {
-		t.Fatalf("viewport did not shrink for the panel: %d then %d", tall, m.viewport.Height)
+	if m.viewport.Height != tall {
+		t.Fatalf("viewport resized for the panel: %d then %d", tall, m.viewport.Height)
 	}
 
 	m.complete()
-	if m.menu.open {
-		t.Skip("completion left the panel open")
-	}
 	if m.viewport.Height != tall {
-		t.Errorf("viewport is %d after the panel closed, want %d back", m.viewport.Height, tall)
+		t.Errorf("viewport is %d after the panel closed, want %d", m.viewport.Height, tall)
 	}
 }
 

@@ -182,3 +182,71 @@ func TestResumeIsQuiet(t *testing.T) {
 		}
 	}
 }
+
+// The sessions list uses the same bar as the transcript, not a caret.
+func TestThePickerDrawsTheCursorBar(t *testing.T) {
+	m := pickerModel(t, 3)
+
+	view := m.pickerView()
+	if strings.Contains(view, "›") {
+		t.Errorf("the picker still uses a caret:\n%s", view)
+	}
+	if !strings.Contains(view, "▌") {
+		t.Errorf("the cursor bar is not drawn:\n%s", view)
+	}
+	if strings.Count(view, "▌") != 1 {
+		t.Errorf("got %d bars, want exactly one:\n%s", strings.Count(view, "▌"), view)
+	}
+}
+
+func TestThePickerBarFollowsTheCursor(t *testing.T) {
+	m := pickerModel(t, 5)
+	m.motion.on = false
+
+	start := m.picker.barAt
+	m.movePicker(1)
+	if m.picker.barAt == start {
+		t.Errorf("the bar did not move from %d", start)
+	}
+	if m.picker.barAt != m.picker.barTo {
+		t.Errorf("without animation the bar should land at once: %d vs %d",
+			m.picker.barAt, m.picker.barTo)
+	}
+}
+
+func TestThePickerBarWalksWhenAnimated(t *testing.T) {
+	m := pickerModel(t, 12)
+	m.motion.on = true
+
+	m.movePicker(6)
+	if m.picker.barAt == m.picker.barTo {
+		t.Skip("the window kept the cursor in place")
+	}
+
+	steps := 0
+	for m.picker.barAt != m.picker.barTo && steps < 100 {
+		m.advancePickerBar()
+		steps++
+	}
+	if steps == 0 {
+		t.Error("the bar arrived without a single step")
+	}
+	if m.picker.barAt != m.picker.barTo {
+		t.Errorf("the bar never arrived: %d vs %d", m.picker.barAt, m.picker.barTo)
+	}
+	if len(m.picker.trail) == 0 {
+		t.Error("the bar left no trail behind it")
+	}
+}
+
+func TestThePickerTrailFades(t *testing.T) {
+	m := pickerModel(t, 6)
+	m.leavePickerTrail(2)
+
+	for range trailLife() + 2 {
+		m.advancePickerBar()
+	}
+	if len(m.picker.trail) != 0 {
+		t.Errorf("the trail outlived its life: %v", m.picker.trail)
+	}
+}

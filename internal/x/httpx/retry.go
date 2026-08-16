@@ -48,9 +48,17 @@ type Client struct {
 }
 
 func (c *Client) Post(ctx context.Context, url string, setHeaders func(*http.Request), body []byte) (*http.Response, error) {
+	return c.do(ctx, http.MethodPost, url, setHeaders, body)
+}
+
+func (c *Client) Get(ctx context.Context, url string, setHeaders func(*http.Request)) (*http.Response, error) {
+	return c.do(ctx, http.MethodGet, url, setHeaders, nil)
+}
+
+func (c *Client) do(ctx context.Context, method, url string, setHeaders func(*http.Request), body []byte) (*http.Response, error) {
 	var lastErr error
 	for attempt := 0; ; attempt++ {
-		resp, err := c.attempt(ctx, url, setHeaders, body)
+		resp, err := c.attempt(ctx, method, url, setHeaders, body)
 		if err == nil {
 			return resp, nil
 		}
@@ -73,12 +81,18 @@ func (c *Client) Post(ctx context.Context, url string, setHeaders func(*http.Req
 	}
 }
 
-func (c *Client) attempt(ctx context.Context, url string, setHeaders func(*http.Request), body []byte) (*http.Response, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
+func (c *Client) attempt(ctx context.Context, method, url string, setHeaders func(*http.Request), body []byte) (*http.Response, error) {
+	var reader io.Reader
+	if body != nil {
+		reader = bytes.NewReader(body)
+	}
+	req, err := http.NewRequestWithContext(ctx, method, url, reader)
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set("content-type", "application/json")
+	if body != nil {
+		req.Header.Set("content-type", "application/json")
+	}
 	if setHeaders != nil {
 		setHeaders(req)
 	}

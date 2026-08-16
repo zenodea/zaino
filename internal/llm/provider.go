@@ -18,6 +18,20 @@ type ModelLister interface {
 	Models() []string
 }
 
+// ModelFetcher is optional: a provider that can ask its host which models the
+// credential actually reaches. Line-ups move faster than releases, so a list
+// compiled here goes stale; this one cannot.
+type ModelFetcher interface {
+	FetchModels(ctx context.Context) ([]string, error)
+}
+
+// TokenCounter is optional: a provider that will say, before a request is
+// sent, exactly how much of the window it occupies. A ceiling measured with
+// the estimator is a ceiling in roughly the right place.
+type TokenCounter interface {
+	CountTokens(ctx context.Context, req Request) (int, error)
+}
+
 type Stream interface {
 	Next() bool
 	Event() Event

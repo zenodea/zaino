@@ -48,6 +48,12 @@ func (a *approver) ask(ctx context.Context, req permission.Request) (permission.
 		fmt.Fprint(os.Stderr, "\x1b[2m[y] allow  [a] allow for the session  [n] refuse\x1b[0m › ")
 
 		line, err := a.in.ReadString('\n')
+		// Enter means yes, but only when someone pressed it: a closed stdin
+		// hands back the same empty line and must never approve.
+		if err != nil && strings.TrimSpace(line) == "" {
+			fmt.Fprintln(os.Stderr)
+			return permission.Reject, nil
+		}
 		switch strings.ToLower(strings.TrimSpace(line)) {
 		case "y", "yes", "":
 			return permission.Once, nil

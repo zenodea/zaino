@@ -36,11 +36,19 @@ type Agent struct {
 	MaxTurns  int
 	TaskTurns int
 
+	// A hard ceiling on the context, in tokens. Zero leaves the session
+	// unbounded. Unlike the compaction window nothing is folded to stay under
+	// it: the turn stops instead, and only AllowOnce gets past.
+	MaxContext int
+
 	Hooks Hooks
 
 	// What the provider counted for the last turn, so the next one knows how
 	// close to the window it is.
-	used int
+	used  int
+	meter meter
+
+	allowOnce bool
 }
 
 const (
@@ -66,6 +74,15 @@ func (e *RefusalError) Error() string {
 // What the provider counted for the last turn, and how much it may hold.
 func (a *Agent) Used() int { return a.used }
 
+// Ceiling reports the tightest bound on this session, the hard limit if one is
+// set and the compaction window otherwise.
+func (a *Agent) Ceiling() int {
+	if a.MaxContext > 0 && (a.Window() == 0 || a.MaxContext < a.Window()) {
+		return a.MaxContext
+	}
+	return a.Window()
+}
+
 func (a *Agent) Window() int {
 	if a.Compaction == nil {
 		return 0
@@ -79,6 +96,11 @@ func (a *Agent) Run(ctx context.Context, history []llm.Message) ([]llm.Message, 
 		maxTurns = DefaultMaxTurns
 	}
 
+	// Consent to go over covers the whole run: a tool loop that stopped to ask
+	// again between a call and its result would be asking mid-sentence.
+	allowed := a.allowOnce
+	a.allowOnce = false
+
 	for turn := 0; turn < maxTurns; turn++ {
 		if a.shouldCompact(history) {
 			compacted, err := a.compact(ctx, history)
@@ -88,12 +110,19 @@ func (a *Agent) Run(ctx context.Context, history []llm.Message) ([]llm.Message, 
 			history = compacted
 		}
 
+		if !allowed {
+			if err := a.withinLimit(ctx, history); err != nil {
+				return history, err
+			}
+		}
+
 		resp, err := a.turn(ctx, history)
 		if err != nil {
 			return history, err
 		}
 		history = append(history, resp.ToMessage())
-		a.used = resp.Usage.InputTokens + resp.Usage.OutputTokens
+		a.used = contextTokens(resp.Usage)
+		a.remeasured(a.used, len(history))
 
 		if a.Hooks.OnTurn != nil {
 			a.Hooks.OnTurn(resp)
@@ -123,7 +152,7 @@ func (a *Agent) Run(ctx context.Context, history []llm.Message) ([]llm.Message, 
 	return history, ErrMaxTurns
 }
 
-func (a *Agent) turn(ctx context.Context, history []llm.Message) (*llm.Response, error) {
+func (a *Agent) request(history []llm.Message) llm.Request {
 	req := llm.Request{
 		Model:     a.Model,
 		MaxTokens: orDefault(a.MaxTokens, DefaultMaxTokens),
@@ -135,8 +164,11 @@ func (a *Agent) turn(ctx context.Context, history []llm.Message) (*llm.Response,
 	for _, t := range a.Tools {
 		req.Tools = append(req.Tools, t.Definition())
 	}
+	return req
+}
 
-	stream, err := a.Provider.Stream(ctx, req)
+func (a *Agent) turn(ctx context.Context, history []llm.Message) (*llm.Response, error) {
+	stream, err := a.Provider.Stream(ctx, a.request(history))
 	if err != nil {
 		return nil, err
 	}

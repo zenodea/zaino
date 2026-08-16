@@ -126,6 +126,9 @@ func (m *Model) handleChooserKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if apply != nil {
 			apply(m, picked)
 		}
+		// An option that opens something of its own — a masked field, a
+		// subprocess — leaves the command here for the runtime.
+		return m, m.takeQueued()
 
 	case key == "esc", key == "q", key == "h", key == "ctrl+c":
 		m.closeChooser()

@@ -40,6 +40,7 @@ const help = `/help                list the commands
 /permission [mode]   show or set when tools stop to ask  (/perm, /mode)
 /tools               list the tools the model has
 /compact             fold the conversation so far into a summary
+/limit [tokens|off]  stop the session when the context passes a ceiling
 /usage               token usage for this session
 /sessions            list saved sessions      (/resume)
 /quit                leave zaino              (/exit, /q)`
@@ -90,6 +91,11 @@ func runCommand(ag *agent.Agent, line string, messages []llm.Message,
 		backend, err := provider.New(arg)
 		if err != nil {
 			fail("%s", err)
+			// The plain REPL cannot mask a typed key, so it points at the
+			// ways that do not put a secret on screen.
+			if slices.Contains(provider.Available(), arg) {
+				notice("%s", setupHint(arg))
+			}
 			break
 		}
 		if backend.Name() == ag.Provider.Name() {
@@ -194,6 +200,30 @@ func runCommand(ag *agent.Agent, line string, messages []llm.Message,
 		notice("compacted · %d messages kept", max(len(folded)-1, 0))
 		return false, false
 
+	case "limit":
+		if arg == "" {
+			if ag.MaxContext == 0 {
+				notice("limit · off")
+			} else {
+				notice("limit · %d tokens · %d in context now", ag.MaxContext, ag.Used())
+			}
+			break
+		}
+		limit, err := agent.ParseTokens(arg)
+		if err != nil {
+			fail("usage: /limit [tokens|off], got %q", arg)
+			break
+		}
+		ag.MaxContext = limit
+		if err := o.Recorder.Append(session.Limit(limit)); err != nil {
+			fail("%s", err)
+		}
+		if limit == 0 {
+			notice("limit → off")
+		} else {
+			notice("limit → %d · the turn that would pass it stops instead", limit)
+		}
+
 	case "usage":
 		notice("usage · %s · %s\n  input     %d\n  output    %d\n  think     %d\n  cached    %d\n  messages  %d\n  session   %s",
 			ag.Provider.Name(), modelName(ag), usage.InputTokens, usage.OutputTokens,
@@ -229,6 +259,28 @@ func runCommand(ag *agent.Agent, line string, messages []llm.Message,
 		fail("unknown command /%s — try /help", name)
 	}
 	return false, false
+}
+
+// setupHint says how to give a provider credentials without typing a secret
+// into a terminal that will echo it.
+func setupHint(name string) string {
+	lines := []string{"set it up with one of:"}
+	if name == "anthropic" {
+		lines = append(lines, "  ant auth login          (oauth, nothing to store)")
+	}
+	if env := credentialEnv[name]; env != "" {
+		lines = append(lines, "  export "+env+"=…")
+	}
+	lines = append(lines, "  or run the full-screen UI, where /provider takes a key in a masked field")
+	return strings.Join(lines, "\n")
+}
+
+var credentialEnv = map[string]string{
+	"anthropic":  "ANTHROPIC_API_KEY",
+	"gemini":     "GEMINI_API_KEY",
+	"openai":     "OPENAI_API_KEY",
+	"grok":       "XAI_API_KEY",
+	"openrouter": "OPENROUTER_API_KEY",
 }
 
 var efforts = []string{llm.EffortLow, llm.EffortMedium, llm.EffortHigh, llm.EffortXHigh, llm.EffortMax}

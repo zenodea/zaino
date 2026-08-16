@@ -1,6 +1,10 @@
 package tui
 
-import "strings"
+import (
+	"strings"
+
+	tea "github.com/charmbracelet/bubbletea"
+)
 
 const (
 	menuMaxRows = 6
@@ -13,6 +17,13 @@ type menu struct {
 	open    bool
 	matches []command
 	cursor  int
+
+	// The bar walks between rows here for the same reason it does in the
+	// transcript: you can see where it went.
+	barAt int
+	barTo int
+	step  int
+	trail map[int]int
 }
 
 func (m *Model) refreshMenu() {
@@ -40,15 +51,83 @@ func (m *Model) refreshMenu() {
 			break
 		}
 	}
-	m.menu = menu{open: true, matches: matches, cursor: cursor}
+
+	// Narrowing the list must not teleport the bar, so its place carries over
+	// from the menu that was already open.
+	was := m.menu
+	m.menu = menu{open: true, matches: matches, cursor: cursor,
+		barAt: was.barAt, trail: was.trail}
+
+	_, row := m.window()
+	m.menu.barTo = row
+	if !was.open || !m.motion.on {
+		m.menu.barAt = row
+	}
 }
 
-func (m *Model) moveMenu(delta int) {
+func (m *Model) moveMenu(delta int) tea.Cmd {
 	n := len(m.menu.matches)
 	if n == 0 {
-		return
+		return nil
 	}
 	m.menu.cursor = (m.menu.cursor + delta + n) % n
+	m.menu.step = 0
+
+	_, row := m.window()
+	m.menu.barTo = row
+	if !m.motion.on {
+		m.leaveMenuTrail(m.menu.barAt)
+		m.menu.barAt = row
+		return nil
+	}
+	return m.animate()
+}
+
+func (m *Model) menuBar(row int) string {
+	if row == m.menu.barAt {
+		return cursorBar()
+	}
+	if life, ok := m.menu.trail[row]; ok {
+		return trailBar((life + framesPerShade - 1) / framesPerShade)
+	}
+	return noBar()
+}
+
+func (m *Model) leaveMenuTrail(row int) {
+	if m.menu.trail == nil {
+		m.menu.trail = map[int]int{}
+	}
+	m.menu.trail[row] = trailLife()
+}
+
+// advanceMenuBar walks the bar a line at a time and fades what it leaves.
+func (m *Model) advanceMenuBar() bool {
+	if !m.menu.open {
+		return false
+	}
+	moving := false
+	if m.menu.barAt != m.menu.barTo {
+		if m.menu.step++; m.menu.step >= framesPerLine {
+			m.menu.step = 0
+			m.leaveMenuTrail(m.menu.barAt)
+			if m.menu.barAt < m.menu.barTo {
+				m.menu.barAt++
+			} else {
+				m.menu.barAt--
+			}
+		}
+		moving = true
+	}
+	return m.fadeMenuTrail() || moving
+}
+
+func (m *Model) fadeMenuTrail() bool {
+	for row := range m.menu.trail {
+		if m.menu.trail[row]--; m.menu.trail[row] <= 0 {
+			delete(m.menu.trail, row)
+		}
+	}
+	return len(m.menu.trail) > 0
 }
 
 func (m *Model) selected() (command, bool) {
@@ -116,11 +195,11 @@ func (m *Model) menuView() string {
 		name := "/" + c.name
 		gap := strings.Repeat(" ", names-len(name)+2)
 
-		marker, label, summary := " ", metaStyle, metaStyle
+		label, summary := metaStyle, metaStyle
 		if i == cursor {
-			marker, label, summary = "›", menuPickStyle, hintStyle
+			label, summary = menuPickStyle, hintStyle
 		}
-		lines[i] = userMarker.Render(marker) + " " +
+		lines[i] = m.menuBar(i) + " " +
 			label.Render(name) + gap + summary.Render(truncate(c.summary, summaries))
 	}
 	return menuBoxStyle.Width(inner).Render(strings.Join(lines, "\n"))

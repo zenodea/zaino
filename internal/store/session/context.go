@@ -15,6 +15,7 @@ type Context struct {
 	System   string
 	Effort   string
 	Thinking *bool
+	Limit    *int
 
 	Usage llm.Usage
 }
@@ -50,6 +51,8 @@ func Build(entries []Entry) Context {
 			c.Effort = e.Level
 		case KindThinking:
 			c.Thinking = e.On
+		case KindLimit:
+			c.Limit = e.Tokens
 		}
 	}
 
