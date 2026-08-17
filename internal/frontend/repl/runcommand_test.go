@@ -49,7 +49,8 @@ func run(t *testing.T, ag *agent.Agent, line string, o Options) (out string, cle
 	}()
 
 	var usage llm.Usage
-	cleared, quit = runCommand(ag, line, nil, &usage, o)
+	did := runCommand(ag, line, nil, &usage, o)
+	cleared, quit = did.changed, did.quit
 
 	w.Close()
 	os.Stderr = saved
@@ -75,7 +76,8 @@ func TestClearForgetsTheConversationAndItsUsage(t *testing.T) {
 		saved := os.Stderr
 		os.Stderr = w
 		usage := llm.Usage{InputTokens: 500, OutputTokens: 20}
-		cleared, quit := runCommand(ag, line, nil, &usage, Options{})
+		done := runCommand(ag, line, nil, &usage, Options{})
+		cleared, quit := done.changed, done.quit
 		w.Close()
 		os.Stderr = saved
 		io.Copy(io.Discard, r)

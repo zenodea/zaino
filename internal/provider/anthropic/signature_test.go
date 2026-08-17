@@ -46,7 +46,7 @@ func TestHistoryWithoutSignaturesIsPassedThrough(t *testing.T) {
 	messages := []llm.Message{toolUse("")}
 	req := buildRequest(llm.Request{Messages: messages}, "claude-opus-5")
 
-	if &req.Messages[0] != &messages[0] {
+	if &req.Messages.messages[0] != &messages[0] {
 		t.Error("a history with nothing to strip was copied anyway")
 	}
 }

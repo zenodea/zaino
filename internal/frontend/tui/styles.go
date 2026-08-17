@@ -43,6 +43,7 @@ var (
 	toolStyle     = lipgloss.NewStyle().Foreground(tooling)
 	errorStyle    = lipgloss.NewStyle().Foreground(danger)
 	hintStyle     = lipgloss.NewStyle().Foreground(muted)
+	attachedStyle = lipgloss.NewStyle().Foreground(tooling)
 	spinnerStyle  = lipgloss.NewStyle().Foreground(accent)
 
 	menuBoxStyle = lipgloss.NewStyle().

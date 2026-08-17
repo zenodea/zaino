@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 
 	"github.com/zenodea/zaino/internal/llm"
@@ -28,6 +29,13 @@ type Agent struct {
 	System    string
 	Effort    string
 	Thinking  *llm.Thinking
+
+	// Where the agent is running. It goes out after the system prompt but is
+	// not one: it describes the ground rather than the job, so it is read
+	// fresh every run and never recorded with the session.
+	Project string
+
+	Subagents []Subagent
 
 	Tools      []tool.Tool
 	Gate       *permission.Gate
@@ -156,7 +164,7 @@ func (a *Agent) request(history []llm.Message) llm.Request {
 	req := llm.Request{
 		Model:     a.Model,
 		MaxTokens: orDefault(a.MaxTokens, DefaultMaxTokens),
-		System:    a.System,
+		System:    joinPrompt(a.System, a.Project),
 		Messages:  history,
 		Thinking:  a.Thinking,
 		Effort:    a.Effort,
@@ -235,7 +243,18 @@ func (a *Agent) runTools(ctx context.Context, calls []llm.ToolUseBlock) llm.Cont
 		}
 		results[i] = a.execute(ctx, calls[i], ready)
 	}
-	return results
+	return append(results, attachments(admitted)...)
+}
+
+// What the tools want looked at follows their results, in the same message.
+func attachments(calls []tool.Call) llm.Content {
+	var out llm.Content
+	for _, call := range calls {
+		if with, ok := call.(tool.Attaches); ok {
+			out = append(out, with.Attachments()...)
+		}
+	}
+	return out
 }
 
 func (a *Agent) admit(ctx context.Context, call llm.ToolUseBlock) (ready tool.Call, err error) {
@@ -295,4 +314,14 @@ func orDefault[T comparable](v, fallback T) T {
 		return fallback
 	}
 	return v
+}
+
+func joinPrompt(parts ...string) string {
+	var kept []string
+	for _, part := range parts {
+		if part = strings.TrimSpace(part); part != "" {
+			kept = append(kept, part)
+		}
+	}
+	return strings.Join(kept, "\n\n")
 }

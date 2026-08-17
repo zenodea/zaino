@@ -14,6 +14,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 
 	"github.com/zenodea/zaino/internal/agent"
+	"github.com/zenodea/zaino/internal/config"
 	"github.com/zenodea/zaino/internal/llm"
 	"github.com/zenodea/zaino/internal/permission"
 	"github.com/zenodea/zaino/internal/store/credentials"
@@ -63,6 +64,9 @@ type Model struct {
 	chooser  chooser
 	sheet    sheet
 	secret   secret
+
+	cfg    *config.Config
+	custom []command
 
 	creds      *credentials.Store
 	recall     *recall.List
@@ -467,11 +471,7 @@ func (m *Model) submit() tea.Cmd {
 	if m.recall != nil {
 		m.recall.Add(prompt)
 	}
-
-	m.push(entry{kind: entryUser, text: prompt})
-	m.messages = append(m.messages, llm.UserText(prompt))
-
-	return m.launch()
+	return m.send(prompt, prompt)
 }
 
 // Hands the conversation as it stands to the agent. Sending a fresh prompt and

@@ -27,6 +27,14 @@ type Asks interface {
 	Action() permission.Action
 }
 
+// Attaches is optional: a call with something to be looked at rather than
+// read says so here, once it has run. It rides on the message the result
+// travels in, since a tool result is text everywhere and only some providers
+// would take a picture inside one.
+type Attaches interface {
+	Attachments() llm.Content
+}
+
 func ActionOf(t Tool) permission.Action {
 	if a, ok := t.(Asks); ok {
 		return a.Action()

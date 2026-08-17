@@ -10,6 +10,8 @@ An agent harness in Go, with hand-rolled provider clients and a terminal UI.
     internal/tool/               read, write, edit, bash, grep, find, ls, fetch
     internal/permission/         Who is allowed to do what, and who to ask
     internal/mcp/                MCP servers, spoken over stdio
+    internal/config/             The files you configure zaino with
+    internal/attach/             Pictures, on a prompt or a tool result
 
     internal/provider/           Name → provider, with credential auto-detect
     internal/provider/anthropic/ Claude provider (Messages API)
@@ -47,7 +49,11 @@ Flags: `-provider`, `-model`, `-max-tokens`, `-effort` (Anthropic only),
 `-system`, `-thinking`, `-plain`, `-v`, `-continue`/`-c`, `-resume`/`-r`,
 `-no-save`, `-log`, `-permission`, `-allow-outside`, `-tools`,
 `-exclude-tools`, `-no-tools`, `-no-subagents`, `-mcp`, `-no-mcp`, `-vim`,
-`-mouse`, `-animate`, `-context-window`, `-no-compact`, `-max-context`.
+`-mouse`, `-animate`, `-context-window`, `-no-compact`, `-max-context`,
+`-profile`, `-no-config`.
+
+`-system` takes the prompt itself, or `@` and a file holding one:
+`-system @prompts/terse.md`.
 
 Keys: `⏎` send, `⌥⏎` newline, `⌃j`/`⌃k` walk the chat, `↑`/`↓` earlier prompts,
 `⇧⇥` cycle permission mode, `PgUp`/`PgDn` and `⌃u`/`⌃d` scroll.
@@ -90,6 +96,82 @@ What the model writes is rendered as markdown — bold, italics, inline code,
 headings, lists, quotes and fenced code blocks. Your own prompts are shown as
 typed, so a literal `**` stays one.
 
+## Configuration
+
+Two files with the same shape, and a flag beats both of them:
+
+    ~/.config/zaino/config.json      yours, wherever $XDG_CONFIG_HOME points
+    <project>/.zaino/config.json     the project's, found from any depth in it
+
+The keys are the flag names, so anything you can pass you can also settle on
+once:
+
+    {
+      "provider": "anthropic",
+      "model": "claude-opus-5",
+      "effort": "high",
+      "thinking": true,
+      "permission": "accept-edits",
+      "allow": ["bash:git status", "bash:go test"],
+      "deny": ["read:.env"],
+      "profiles": {
+        "cheap": {"model": "claude-haiku-4-5", "effort": "low"},
+        "deep":  {"model": "claude-opus-5", "effort": "max", "thinking": true}
+      }
+    }
+
+The project's answer wins where the two disagree, except that `allow` and
+`deny` add up: a project may widen what it is allowed to do without repeating
+what you already said. A key that is not a setting is an error naming the file,
+because a typo that goes quiet is worse than one that stops you. `-no-config`
+ignores both files, and `/config` says what they came to and which files had a
+say.
+
+**The system prompt** is `~/.config/zaino/system.md`, or the `system` key,
+which overrides it. Both are settings: they are recorded with the session and
+come back with `-continue`.
+
+**ZAINO.md is not a setting.** It is read from the repository root down to the
+working directory, appended to the system prompt, and never recorded — it says
+where zaino is running rather than what it is for, so it is read fresh every
+run and a note added to it lands in the next turn of an old session.
+
+**Profiles** are named bundles of the model-facing settings — the cheap one,
+the thorough one. `-profile deep` picks one, `/profile` switches mid-session,
+and a `"profile"` key names the one to start on.
+
+**Commands** are prompts you have written down. `commands/review.md` under
+either directory becomes `/review`, and what it says is sent as if you had
+typed it:
+
+    ---
+    description: read the diff and say what is wrong
+    ---
+    Read the diff on this branch and tell me what is wrong with it.
+    Concentrate on $ARGUMENTS.
+
+`$ARGUMENTS` is everything after the command and `$1` to `$9` are its words. A
+command that asks for neither still gets what you typed, on the end. A file
+cannot take a name zaino already answers to — `/quit` keeps meaning quit — and
+the project's version of a name replaces yours.
+
+`/bro` is one of these that zaino ships with: it asks for the last answer
+again, simply, for when the reply was too dense to land. It is a prompt like
+any other, so `commands/bro.md` of your own replaces it outright.
+
+**Agents** are the same idea for `task`. `agents/scout.md` describes a second
+agent: what it is for, what it may use, and what it is told before the work.
+
+    ---
+    description: find where something is used, and report back
+    tools: read, grep, find, ls
+    model: claude-haiku-4-5
+    ---
+    You search a codebase and answer with file:line and a sentence each.
+
+The model picks one by name when it fits. An agent that names no tools inherits
+the lot, and one naming a tool that does not exist is refused before it runs.
+
 ## Vim
 
 Modal editing is on by default; `-vim=false` or `/vim off` turns it off. The
@@ -128,8 +210,12 @@ A line beginning with `/` acts on the session instead of going to the model:
     /effort [level]      show or set output effort
     /thinking [on|off]   show or hide the model's reasoning
     /system [prompt|-]   show, set, or drop the system prompt
+    /bro                 say the last answer again, simply
+    /profile [name]      switch to a named bundle of settings
+    /config              what the config files came to, and where they are
     /permission [mode]   show or set when tools stop to ask  (/perm, /mode)
     /tools               list the tools the model has
+    /rewind [prompt]     take the conversation up again from an earlier turn
     /compact             fold the conversation so far into a summary
     /limit [tokens|off]  stop the session when the context passes a ceiling
     /vim [on|off]        modal editing in the composer
@@ -205,6 +291,29 @@ than permission:
 If a file changes on disk between an edit being worked out and being allowed,
 the write is refused rather than clobbering the other writer.
 
+## Pictures
+
+An `@` and a path attaches an image to what you are typing, which is what a
+file dropped onto the terminal leaves behind:
+
+    why is the spacing wrong in @shot.png
+
+PNG, JPEG, GIF and WebP, up to five megabytes, which is the providers' ceiling
+rather than ours. A prompt that merely mentions `shot.png` is still only
+talking about it; the `@` is what sends it. A mention that will not load stops
+the turn instead of quietly going without, since a question about a screenshot
+that arrives without one reads as though the model went blind.
+
+`read` hands back a picture too, so the model can look at anything in the
+workspace on its own. The result says what the file is — kind, size,
+dimensions — and the picture follows it, riding on the same message rather
+than inside the result, because a tool result is text on every provider and
+only some of them would take a picture inside one.
+
+Anthropic takes them natively, Gemini as inline data, and the OpenAI-shaped
+providers as a data URI. They are stored in the session as they were sent, so
+a resumed conversation still has what it was looking at.
+
 ## Subagents
 
 `task` runs a second agent with its own conversation and hands back only what
@@ -217,10 +326,16 @@ refusal: it asks with the same policy and the same approver. It cannot ask you
 anything itself, so the prompt has to carry everything it needs. Nesting stops
 two deep, and `-no-subagents` withholds it.
 
+Agents described in `agents/*.md` are offered to `task` by name, each with its
+own prompt, its own model and its own share of the tools — see Configuration.
+Without any, `task` spawns a copy of the agent that called it, which is what it
+always did.
+
 ## MCP
 
-Servers are declared in `mcp.json` beside the sessions, or wherever `-mcp`
-points:
+Servers are declared in `mcp.json` — `~/.config/zaino/mcp.json` for the ones
+you always want, `<project>/.zaino/mcp.json` for the ones this repository
+needs, or wherever `-mcp` points, which then means that file and no other:
 
     {
       "servers": {
@@ -229,11 +344,29 @@ points:
       }
     }
 
+The two files are merged, and a name declared in both means the project's, not
+both of them. An `mcp.json` left under the data root from before still works.
+
 Each server is spawned on stdio, asked what it can do, and its tools appear
 named `server__tool` so two servers offering `search` stay apart. A server that
 will not start is reported and skipped rather than taken as fatal. Nothing is
 known about what a server does, so its tools ask for approval like anything
 else that leaves the process. `-no-mcp` skips the lot.
+
+## Caching
+
+Anthropic keeps the prefix of a request that is marked for it and reads it
+back at a tenth of the price. The system prompt and the tools are marked,
+along with the end of the last turn and the end of the one before it — the
+first so the next turn reads this one back, the second because that prefix was
+already written last time, which makes marking it a read rather than a second
+write. `-log wire.jsonl` shows the result as `cache_read` on every turn after
+the first.
+
+Folding the conversation rewrites its prefix, so the turn after a compaction
+pays full price and the ones after it are cheap again. Gemini and the
+OpenAI-shaped providers cache what they recognise on their own, with nothing
+to mark.
 
 ## Compaction
 
@@ -298,6 +431,13 @@ What the model may do without asking is a mode, and `⇧⇥` cycles it:
 Set it with `-permission accept-edits` or `/permission plan`. Reading is never
 gated in any mode except by the boundary below.
 
+Standing answers go in the config, so a thing you would always say yes to stops
+asking: `"allow": ["bash:git status"]` covers the commands that start that way,
+`"bash"` covers the tool, and `"*"` covers every tool. A rule matches the start
+of the target, since that is the part a rule can be sure of. `deny` is the
+other direction, and it holds where zaino would not otherwise have asked at
+all — reading, and `bypass`.
+
 When zaino asks, `y` allows once, `a` allows that tool and target for the rest
 of the session, `n` refuses. A refusal is not an error: the model is told it was
 refused and carries on. Answers are recorded in the session, so a transcript
@@ -315,15 +455,18 @@ anything that would prompt is refused. Use `-permission accept-edits` or
 ## Status
 
 Streaming, the turn loop, tools, permissions, both providers, and the UI are
-implemented and tested — 310 tests, including the same tool round-trip driven
-through each provider to prove the loop is provider-agnostic.
+implemented and tested — 700 tests, including the same tool round-trip
+driven through each provider to prove the loop is provider-agnostic.
 
-Not built: branching — every entry already carries an `id` and a `parent`, so
-the tree is what you get the first time the leaf is allowed to move backwards.
+Not built: reading a branch you left behind. The entries are all still there
+and `/rewind` writes them, but nothing yet lists the turns that were abandoned
+or offers to go back to one.
 
 ## History
 
-Three separate things, all under `~/.local/share/zaino` (or `$XDG_DATA_HOME`):
+Three separate things, all under `~/.local/share/zaino` (or `$XDG_DATA_HOME`).
+What you configure lives elsewhere, under `~/.config/zaino` — this is what
+zaino wrote, not what you told it:
 
 `↑` in the composer walks back through prompts you have sent, `↓` walks
 forward and hands back the draft you were part-way through. They are kept in
@@ -340,9 +483,21 @@ prefix of an id, `/sessions` picks one from a list, and `-no-save` records
 nothing.
 
 Resuming restores the model, system prompt, effort and thinking as they were,
-unless you pass the flag for one. A session that used another provider comes
+unless you pass the flag for one — or a `-profile`, which counts as typing the
+flags it stands for. What a config file says is the weakest of the three, so a
+resumed session comes back as it was rather than as your config would start it. A session that used another provider comes
 back on that provider where it can; where it cannot, its reasoning blocks are
 dropped, because they carry a signature only their own provider reads back.
+
+`/rewind` takes the conversation up again from an earlier turn: pick one of
+your own prompts, and it comes back to the composer to be changed and asked
+again, with everything after it out of the context. Nothing is deleted. The
+entries that were there stay in the file on a branch of their own, and what
+gets sent is the line that leads to the newest entry — so the file has always
+been a tree, and this is the first thing that makes one.
+
+Only your own prompts are offered. Going back to anything else would leave a
+tool call without its result, or a result without its call.
 
 `-log wire.jsonl` records every request and response, including streamed
 bodies as they arrive, with the credential headers blanked out.

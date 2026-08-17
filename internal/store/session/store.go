@@ -33,6 +33,10 @@ type Store interface {
 
 	Leaf() (string, error)
 
+	// SetLeaf moves the point new entries hang from: what came after stays on
+	// disk, off the path.
+	SetLeaf(id string) error
+
 	Close() error
 }
 

@@ -205,6 +205,25 @@ func (s *fileStore) Leaf() (string, error) {
 	return s.leaf, nil
 }
 
+// The empty id is the root, which leaves everything recorded so far on a
+// branch of its own.
+func (s *fileStore) SetLeaf(id string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if id == "" {
+		s.leaf = ""
+		return nil
+	}
+	for _, e := range s.entries {
+		if e.ID == id {
+			s.leaf = id
+			return nil
+		}
+	}
+	return fmt.Errorf("%w: entry %s", ErrNotFound, id)
+}
+
 func (s *fileStore) Close() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -279,7 +298,7 @@ func summarize(path string) (Summary, error) {
 	defer s.Close()
 
 	out := Summary{Meta: s.meta, Updated: info.ModTime()}
-	for _, e := range s.entries {
+	for _, e := range Path(s.entries) {
 		if e.Type != KindMessage || e.Message == nil {
 			continue
 		}

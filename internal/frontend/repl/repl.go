@@ -12,6 +12,8 @@ import (
 	"strings"
 
 	"github.com/zenodea/zaino/internal/agent"
+	"github.com/zenodea/zaino/internal/attach"
+	"github.com/zenodea/zaino/internal/config"
 	"github.com/zenodea/zaino/internal/llm"
 	"github.com/zenodea/zaino/internal/permission"
 	"github.com/zenodea/zaino/internal/store/session"
@@ -20,6 +22,7 @@ import (
 
 type Options struct {
 	Provider     string
+	Config       *config.Config
 	ShowThinking bool
 	Verbose      bool
 
@@ -116,14 +119,17 @@ func Run(ag *agent.Agent, o Options) error {
 			continue
 		}
 		if isCommand(prompt) {
-			cleared, quit := runCommand(ag, prompt, messages, &usage, o)
-			if quit {
+			done := runCommand(ag, prompt, messages, &usage, o)
+			if done.quit {
 				return nil
 			}
-			if cleared {
-				messages = nil
+			if done.changed {
+				messages = done.context
 			}
-			continue
+			if done.send == "" {
+				continue
+			}
+			prompt = done.send
 		}
 		asker := in
 		if !o.Interactive {
@@ -135,7 +141,15 @@ func Run(ag *agent.Agent, o Options) error {
 
 func runTurn(ag *agent.Agent, interrupts *interrupts, messages []llm.Message,
 	prompt string, stdout *bufio.Writer, rec *session.Recorder, in *bufio.Reader) []llm.Message {
-	messages = append(messages, llm.UserText(prompt))
+	content, attached, err := attach.Prompt(workdir(), prompt)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "\x1b[31m"+err.Error()+"\x1b[0m")
+		return messages
+	}
+	for _, what := range attached {
+		fmt.Fprintf(os.Stderr, "\x1b[2m⧉ %s\x1b[0m\n", what)
+	}
+	messages = append(messages, llm.Message{Role: llm.RoleUser, Content: content})
 
 	for {
 		ctx, cancel := context.WithCancel(context.Background())
@@ -191,6 +205,14 @@ func askPastLimit(err *agent.ContextLimitError, in *bufio.Reader) bool {
 		return false
 	}
 	return true
+}
+
+func workdir() string {
+	dir, err := os.Getwd()
+	if err != nil {
+		return "."
+	}
+	return dir
 }
 
 func compactJSON(raw json.RawMessage) string {

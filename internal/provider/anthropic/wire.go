@@ -1,6 +1,7 @@
 package anthropic
 
 import (
+	"encoding/json"
 	"slices"
 
 	"github.com/zenodea/zaino/internal/llm"
@@ -54,6 +55,74 @@ type wireCacheControl struct {
 	Type string `json:"type"`
 }
 
+// The conversation as it goes out, with the cache breakpoints marked. The
+// blocks still encode themselves; this only says where a kept prefix ends.
+type wireMessages struct {
+	messages []llm.Message
+	marked   map[int]bool
+}
+
+// Anthropic keeps the prefix up to each breakpoint and reads back the longest
+// one that still matches. The turn just finished is marked so the next turn
+// reads it back, and the end of the previous turn is marked too: that prefix
+// was written last time, so marking it again is a read rather than a second
+// write, and it survives a turn that added a whole batch of tool results.
+func cacheMessages(messages []llm.Message) wireMessages {
+	marked := map[int]bool{}
+	if last := len(messages) - 1; last >= 0 {
+		marked[last] = true
+		for i := last - 1; i >= 0; i-- {
+			if messages[i].Role == llm.RoleUser {
+				marked[i] = true
+				break
+			}
+		}
+	}
+	return wireMessages{messages: messages, marked: marked}
+}
+
+func (m wireMessages) MarshalJSON() ([]byte, error) {
+	out := make([]json.RawMessage, len(m.messages))
+	for i, message := range m.messages {
+		content := make([]json.RawMessage, len(message.Content))
+		for j, block := range message.Content {
+			raw, err := json.Marshal(block)
+			if err != nil {
+				return nil, err
+			}
+			if m.marked[i] && j == len(message.Content)-1 {
+				if raw, err = withCacheControl(raw); err != nil {
+					return nil, err
+				}
+			}
+			content[j] = raw
+		}
+
+		raw, err := json.Marshal(struct {
+			Role    llm.Role          `json:"role"`
+			Content []json.RawMessage `json:"content"`
+		}{message.Role, content})
+		if err != nil {
+			return nil, err
+		}
+		out[i] = raw
+	}
+	return json.Marshal(out)
+}
+
+// Spliced into a block that has already encoded itself, so no block type has
+// to know about caching.
+func withCacheControl(raw json.RawMessage) (json.RawMessage, error) {
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &fields); err != nil {
+		// Not an object, so there is nothing to mark. A block that cannot
+		// carry the marker is not worth failing the request over.
+		return raw, nil
+	}
+	fields["cache_control"] = json.RawMessage(`{"type":"ephemeral"}`)
+	return json.Marshal(fields)
+}
+
 type wireSystemBlock struct {
 	Type         string            `json:"type"`
 	Text         string            `json:"text"`
@@ -79,7 +148,7 @@ type wireRequest struct {
 	Model     string `json:"model"`
 	MaxTokens int    `json:"max_tokens"`
 
-	Messages     []llm.Message     `json:"messages"`
+	Messages     wireMessages      `json:"messages"`
 	System       []wireSystemBlock `json:"system,omitempty"`
 	Tools        []wireTool        `json:"tools,omitempty"`
 	Thinking     *wireThinking     `json:"thinking,omitempty"`
@@ -91,7 +160,7 @@ type wireRequest struct {
 // gets the same request with those left off.
 type wireCountRequest struct {
 	Model    string            `json:"model"`
-	Messages []llm.Message     `json:"messages"`
+	Messages wireMessages      `json:"messages"`
 	System   []wireSystemBlock `json:"system,omitempty"`
 	Tools    []wireTool        `json:"tools,omitempty"`
 	Thinking *wireThinking     `json:"thinking,omitempty"`
@@ -112,7 +181,7 @@ func buildRequest(req llm.Request, defaultModel string) wireRequest {
 	out := wireRequest{
 		Model:     orDefault(req.Model, defaultModel),
 		MaxTokens: orDefault(req.MaxTokens, 8192),
-		Messages:  stripToolSignatures(req.Messages),
+		Messages:  cacheMessages(stripToolSignatures(req.Messages)),
 		Stream:    true,
 	}
 

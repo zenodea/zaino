@@ -104,6 +104,40 @@ func (b ToolResultBlock) MarshalJSON() ([]byte, error) {
 	}{"tool_result", alias(b)})
 }
 
+// An image the model can look at. The bytes are held decoded and encoded on
+// the way out, since every provider takes base64 and none of them agree on
+// where to put it.
+type ImageBlock struct {
+	MediaType string
+	Data      []byte
+}
+
+func (ImageBlock) blockType() string { return "image" }
+
+type imageSource struct {
+	Type      string `json:"type"`
+	MediaType string `json:"media_type"`
+	Data      []byte `json:"data"`
+}
+
+func (b ImageBlock) MarshalJSON() ([]byte, error) {
+	return json.Marshal(struct {
+		Type   string      `json:"type"`
+		Source imageSource `json:"source"`
+	}{"image", imageSource{Type: "base64", MediaType: b.MediaType, Data: b.Data}})
+}
+
+func (b *ImageBlock) UnmarshalJSON(data []byte) error {
+	var wire struct {
+		Source imageSource `json:"source"`
+	}
+	if err := json.Unmarshal(data, &wire); err != nil {
+		return err
+	}
+	b.MediaType, b.Data = wire.Source.MediaType, wire.Source.Data
+	return nil
+}
+
 type OpaqueBlock struct {
 	Type string
 	Raw  json.RawMessage
@@ -154,6 +188,10 @@ func UnmarshalBlock(raw json.RawMessage) (ContentBlock, error) {
 		return b, err
 	case "tool_result":
 		var b ToolResultBlock
+		err := json.Unmarshal(raw, &b)
+		return b, err
+	case "image":
+		var b ImageBlock
 		err := json.Unmarshal(raw, &b)
 		return b, err
 	default:

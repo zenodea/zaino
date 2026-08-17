@@ -8,6 +8,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/zenodea/zaino/internal/attach"
 	"github.com/zenodea/zaino/internal/llm"
 	"github.com/zenodea/zaino/internal/permission"
 )
@@ -27,7 +28,8 @@ func (r *Read) Definition() llm.Tool {
 		Name: "read",
 		Description: "Read a file from disk. Output is line-numbered, which is how you " +
 			"refer to places in it. Long files come back truncated; use offset and limit " +
-			"to page through the rest.",
+			"to page through the rest. Images (" + strings.Join(attach.Kinds(), ", ") + ") " +
+			"come back as pictures for you to look at.",
 		InputSchema: object(map[string]any{
 			"path":   field("string", "File to read, absolute or relative to the working directory."),
 			"offset": field("integer", "First line to read, 1-based. Defaults to the start of the file."),
@@ -53,6 +55,15 @@ type readCall struct {
 	path   Path
 	offset int
 	limit  int
+
+	image *llm.ImageBlock
+}
+
+func (c *readCall) Attachments() llm.Content {
+	if c.image == nil {
+		return nil
+	}
+	return llm.Content{*c.image}
 }
 
 func (c *readCall) Request() permission.Request {
@@ -71,6 +82,15 @@ func (c *readCall) Run(context.Context) (string, error) {
 	}
 	if info.IsDir() {
 		return "", fmt.Errorf("%s is a directory — use ls", c.path)
+	}
+
+	if attach.IsImage(c.path.Abs) {
+		image, err := attach.Image(c.path.Abs)
+		if err != nil {
+			return "", err
+		}
+		c.image = &image
+		return attach.Describe(c.path.String(), image) + " — the image follows this result", nil
 	}
 
 	content, err := os.ReadFile(c.path.Abs)

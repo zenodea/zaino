@@ -29,23 +29,41 @@ func TaskTool(parent *Agent) tool.Tool { return &Task{parent: parent} }
 type taskArgs struct {
 	Description string `json:"description"`
 	Prompt      string `json:"prompt"`
+	Agent       string `json:"agent,omitempty"`
 }
 
 func (t *Task) Action() permission.Action { return permission.Read }
 
 func (t *Task) Definition() llm.Tool {
+	description := "Hand a self-contained piece of work to a second agent and get back only " +
+		"its answer. It has the same tools but its own conversation, so use it when finding " +
+		"something out would otherwise mean reading a lot into this one — searching a " +
+		"codebase, checking a claim across many files, surveying how something is used. " +
+		"It cannot ask you anything, so say everything it needs in the prompt, and tell it " +
+		"what to report back."
+
+	properties := map[string]any{
+		"description": field("string", "A few words naming the job, for the transcript."),
+		"prompt":      field("string", "Everything the second agent needs, and what to report back."),
+	}
+
+	if named := t.parent.Subagents; len(named) > 0 {
+		lines := make([]string, len(named))
+		for i, s := range named {
+			lines[i] = s.Name + ": " + orDefault(s.Description, "no description given")
+		}
+		description += " Named agents are set up for particular work — " +
+			strings.Join(lines, "; ") + ". Pick one when it fits; leave it out for a general agent."
+
+		agent := field("string", "Which named agent to use. "+strings.Join(lines, "; "))
+		agent["enum"] = t.parent.subagentNames()
+		properties["agent"] = agent
+	}
+
 	return llm.Tool{
-		Name: "task",
-		Description: "Hand a self-contained piece of work to a second agent and get back only " +
-			"its answer. It has the same tools but its own conversation, so use it when finding " +
-			"something out would otherwise mean reading a lot into this one — searching a " +
-			"codebase, checking a claim across many files, surveying how something is used. " +
-			"It cannot ask you anything, so say everything it needs in the prompt, and tell it " +
-			"what to report back.",
-		InputSchema: object(map[string]any{
-			"description": field("string", "A few words naming the job, for the transcript."),
-			"prompt":      field("string", "Everything the second agent needs, and what to report back."),
-		}, "description", "prompt"),
+		Name:        "task",
+		Description: description,
+		InputSchema: object(properties, "description", "prompt"),
 	}
 }
 
@@ -61,11 +79,22 @@ func (t *Task) Prepare(input json.RawMessage) (tool.Call, error) {
 		return nil, fmt.Errorf("already %d agents deep — do this one yourself", t.depth)
 	}
 
+	var named Subagent
+	if args.Agent != "" {
+		var err error
+		if named, err = t.parent.subagent(args.Agent); err != nil {
+			return nil, err
+		}
+		if _, err := named.toolbox(t.parent.Tools); err != nil {
+			return nil, fmt.Errorf("agent %s: %w", named.Name, err)
+		}
+	}
+
 	what := strings.TrimSpace(args.Description)
 	if what == "" {
-		what = "task"
+		what = orDefault(named.Name, "task")
 	}
-	return &taskCall{parent: t.parent, depth: t.depth, what: what, prompt: args.Prompt}, nil
+	return &taskCall{parent: t.parent, depth: t.depth, what: what, prompt: args.Prompt, agent: named}, nil
 }
 
 type taskCall struct {
@@ -73,6 +102,7 @@ type taskCall struct {
 	depth  int
 	what   string
 	prompt string
+	agent  Subagent
 }
 
 // The gate the child inherits is the parent's, so a subagent cannot be used to
@@ -89,16 +119,23 @@ func (c *taskCall) Request() permission.Request {
 func (c *taskCall) Run(ctx context.Context) (string, error) {
 	child := &Agent{
 		Provider:  c.parent.Provider,
-		Model:     c.parent.Model,
+		Model:     orDefault(c.agent.Model, c.parent.Model),
 		MaxTokens: c.parent.MaxTokens,
-		System:    c.parent.System,
+		System:    orDefault(c.agent.System, c.parent.System),
+		Project:   c.parent.Project,
+		Subagents: c.parent.Subagents,
 		Effort:    c.parent.Effort,
 		Thinking:  c.parent.Thinking,
 		Gate:      c.parent.Gate,
 		MaxTurns:  orDefault(c.parent.TaskTurns, DefaultTaskTurns),
 		Hooks:     Hooks{OnToolCall: c.parent.Hooks.OnToolCall, OnToolResult: c.parent.Hooks.OnToolResult},
 	}
-	child.Tools = deepen(c.parent.Tools, child, c.depth+1)
+
+	tools, err := c.agent.toolbox(c.parent.Tools)
+	if err != nil {
+		return "", fmt.Errorf("%s: %w", c.what, err)
+	}
+	child.Tools = deepen(tools, child, c.depth+1)
 
 	history, err := child.Run(ctx, []llm.Message{llm.UserText(c.prompt)})
 	if err != nil {

@@ -75,6 +75,17 @@ func commandList() []command {
 			run:     cmdSystem,
 		},
 		{
+			name:    "profile",
+			arg:     "[name]",
+			summary: "switch to a named bundle of settings",
+			run:     cmdProfile,
+		},
+		{
+			name:    "config",
+			summary: "what the config files came to, and where they are",
+			run:     cmdConfig,
+		},
+		{
 			name:    "permission",
 			aliases: []string{"perm", "mode"},
 			arg:     "[mode]",
@@ -91,6 +102,13 @@ func commandList() []command {
 			arg:     "[on|off]",
 			summary: "modal editing in the composer",
 			run:     cmdVim,
+		},
+		{
+			name:    "rewind",
+			aliases: []string{"branch", "back"},
+			arg:     "[prompt]",
+			summary: "take the conversation up again from an earlier turn",
+			run:     cmdRewind,
 		},
 		{
 			name:    "compact",
@@ -155,8 +173,10 @@ func splitCommand(line string) (name, arg string) {
 	return strings.ToLower(name), strings.TrimSpace(rest)
 }
 
-func lookupCommand(name string) (command, bool) {
-	for _, c := range commandList() {
+func lookupCommand(name string) (command, bool) { return findCommand(commandList(), name) }
+
+func findCommand(all []command, name string) (command, bool) {
+	for _, c := range all {
 		if c.name == name {
 			return c, true
 		}
@@ -169,14 +189,16 @@ func lookupCommand(name string) (command, bool) {
 	return command{}, false
 }
 
-func matchCommands(pattern string) []command {
+func matchCommands(pattern string) []command { return rankCommands(commandList(), pattern) }
+
+func rankCommands(all []command, pattern string) []command {
 	type scored struct {
 		command
 		score int
 	}
 
 	var out []scored
-	for _, c := range commandList() {
+	for _, c := range all {
 		best, ok := fuzzyScore(pattern, c.name)
 		for _, alias := range c.aliases {
 			if score, hit := fuzzyScore(pattern, alias); hit && (!ok || score-1 > best) {
@@ -224,7 +246,7 @@ func fuzzyScore(pattern, target string) (int, bool) {
 
 func (m *Model) runCommand(line string) tea.Cmd {
 	name, arg := splitCommand(line)
-	c, ok := lookupCommand(name)
+	c, ok := findCommand(m.commands(), name)
 	if !ok {
 		m.push(entry{kind: entryError, text: fmt.Sprintf("unknown command /%s — try /help", name)})
 		return nil
@@ -237,7 +259,7 @@ func (m *Model) notice(format string, args ...any) {
 }
 
 func cmdHelp(m *Model, _ string) tea.Cmd {
-	all := commandList()
+	all := m.commands()
 
 	width := 0
 	labels := make([]string, len(all))

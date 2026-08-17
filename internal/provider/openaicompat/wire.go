@@ -1,6 +1,7 @@
 package openaicompat
 
 import (
+	"encoding/base64"
 	"fmt"
 	"strings"
 
@@ -19,11 +20,28 @@ type toolCall struct {
 	Function functionCall `json:"function"`
 }
 
+// Content is a string on almost every message and an array of parts on one
+// carrying an image. The string form is what every compatible host has always
+// understood, so it stays the default.
 type message struct {
 	Role       string     `json:"role"`
-	Content    string     `json:"content,omitempty"`
+	Content    any        `json:"content,omitempty"`
 	ToolCalls  []toolCall `json:"tool_calls,omitempty"`
 	ToolCallID string     `json:"tool_call_id,omitempty"`
+}
+
+type imageURL struct {
+	URL string `json:"url"`
+}
+
+type contentPart struct {
+	Type     string    `json:"type"`
+	Text     string    `json:"text,omitempty"`
+	ImageURL *imageURL `json:"image_url,omitempty"`
+}
+
+func dataURI(b llm.ImageBlock) string {
+	return "data:" + b.MediaType + ";base64," + base64.StdEncoding.EncodeToString(b.Data)
 }
 
 type functionDef struct {
@@ -168,11 +186,15 @@ func translateMessage(msg llm.Message, calls map[string]bool) ([]message, error)
 	var text strings.Builder
 	var toolCalls []toolCall
 	var results []message
+	var images []llm.ImageBlock
 
 	for _, block := range msg.Content {
 		switch b := block.(type) {
 		case llm.TextBlock:
 			text.WriteString(b.Text)
+
+		case llm.ImageBlock:
+			images = append(images, b)
 
 		case llm.ToolUseBlock:
 			input := string(b.Input)
@@ -203,14 +225,29 @@ func translateMessage(msg llm.Message, calls map[string]bool) ([]message, error)
 
 	// Results have to precede the turn that reads them.
 	out := results
-	if text.Len() > 0 || len(toolCalls) > 0 {
+	if text.Len() > 0 || len(toolCalls) > 0 || len(images) > 0 {
 		out = append(out, message{
 			Role:      string(orRole(msg.Role)),
-			Content:   text.String(),
+			Content:   body(text.String(), images),
 			ToolCalls: toolCalls,
 		})
 	}
 	return out, nil
+}
+
+func body(text string, images []llm.ImageBlock) any {
+	if len(images) == 0 {
+		return text
+	}
+
+	parts := make([]contentPart, 0, len(images)+1)
+	if text != "" {
+		parts = append(parts, contentPart{Type: "text", Text: text})
+	}
+	for _, image := range images {
+		parts = append(parts, contentPart{Type: "image_url", ImageURL: &imageURL{URL: dataURI(image)}})
+	}
+	return parts
 }
 
 func reasoningEffort(effort string) string {

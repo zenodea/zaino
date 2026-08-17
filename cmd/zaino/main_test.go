@@ -23,13 +23,13 @@ func TestToolsSurviveHavingNoMCPServers(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			servers, err := openMCP(tt.off, tt.path)
+			servers, err := openMCP(tt.off, tt.path, nil)
 			if err != nil {
 				t.Fatalf("openMCP: %v", err)
 			}
 			defer servers.Close()
 
-			_, tools, err := openToolbox("manual", false, false, "", "")
+			_, tools, err := openToolbox(t.TempDir(), "manual", false, false, "", "")
 			if err != nil {
 				t.Fatalf("openToolbox: %v", err)
 			}

@@ -11,6 +11,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/zenodea/zaino/internal/agent"
+	"github.com/zenodea/zaino/internal/config"
 	"github.com/zenodea/zaino/internal/frontend/repl"
 	"github.com/zenodea/zaino/internal/frontend/tui"
 	"github.com/zenodea/zaino/internal/llm"
@@ -52,7 +53,7 @@ func run() error {
 		excludeTools = flag.String("exclude-tools", "", "withhold these tools")
 		noTools      = flag.Bool("no-tools", false, "give the model no tools at all")
 		noTask       = flag.Bool("no-subagents", false, "withhold the task tool")
-		mcpConfig    = flag.String("mcp", "", "MCP servers to connect to (default: mcp.json beside the sessions)")
+		mcpConfig    = flag.String("mcp", "", "MCP servers to connect to (default: the mcp.json files in your config)")
 		noMCP        = flag.Bool("no-mcp", false, "do not connect to any MCP server")
 
 		contextWindow = flag.Int("context-window", agent.DefaultWindow,
@@ -67,6 +68,9 @@ func run() error {
 			"scroll with the wheel, at the cost of selecting text with the mouse")
 		animate = flag.Bool("animate", true, "ease the transcript when ⌃j/⌃k move through it")
 
+		profile  = flag.String("profile", "", "a named bundle of settings from your config")
+		noConfig = flag.Bool("no-config", false, "ignore the config files and run on flags alone")
+
 		carryOn  = flag.Bool("continue", false, "carry on the newest session for this directory")
 		resumeID = flag.String("resume", "", "carry on a session by id, or any prefix of one")
 		noSave   = flag.Bool("no-save", false, "do not record this conversation")
@@ -78,6 +82,33 @@ func run() error {
 
 	given := map[string]bool{}
 	flag.Visit(func(f *flag.Flag) { given[f.Name] = true })
+
+	cwd, err := os.Getwd()
+	if err != nil {
+		return err
+	}
+
+	cfg := config.None()
+	if !*noConfig {
+		if cfg, err = config.Load(cwd); err != nil {
+			return err
+		}
+	}
+
+	settings := knobs{
+		provider: providerName, model: model, maxTokens: maxTokens, effort: effort,
+		system: system, thinking: showThink, permission: permMode, allowOutside: allowOutside,
+		tools: toolNames, excludeTools: excludeTools, contextWindow: contextWindow,
+		maxContext: maxContext, vim: vimKeys, mouse: mouse, animate: animate,
+	}
+	if err := settings.apply(cfg, *profile, given); err != nil {
+		return err
+	}
+	if given["system"] {
+		if *system, err = readPrompt(*system); err != nil {
+			return err
+		}
+	}
 
 	contextLimit, err := agent.ParseTokens(*maxContext)
 	if err != nil {
@@ -128,12 +159,15 @@ func run() error {
 		backend = provider.None(err)
 	}
 
-	gate, tools, err := openToolbox(*permMode, *allowOutside, *noTools, *toolNames, *excludeTools)
+	gate, tools, err := openToolbox(cwd, *permMode, *allowOutside, *noTools, *toolNames, *excludeTools)
 	if err != nil {
 		return err
 	}
+	if err := applyRules(gate.Policy, cfg); err != nil {
+		return err
+	}
 
-	servers, err := openMCP(*noMCP, *mcpConfig)
+	servers, err := openMCP(*noMCP, *mcpConfig, cfg.MCP)
 	if err != nil {
 		return err
 	}
@@ -145,6 +179,8 @@ func run() error {
 		Model:     *model,
 		MaxTokens: *maxTokens,
 		System:    *system,
+		Project:   cfg.Context,
+		Subagents: cfg.Subagents,
 		Effort:    *effort,
 		Thinking:  &llm.Thinking{Enabled: true, Show: *showThink},
 		Tools:     tools,
@@ -174,6 +210,7 @@ func run() error {
 	if *plain || *verbose || !isTerminal(os.Stdin) {
 		return repl.Run(ag, repl.Options{
 			Provider:     backend.Name(),
+			Config:       cfg,
 			ShowThinking: *showThink,
 			Verbose:      *verbose,
 			Interactive:  isTerminal(os.Stdin),
@@ -186,6 +223,7 @@ func run() error {
 	}
 
 	m := tui.New(ag, backend.Name())
+	m.UseConfig(cfg)
 	gate.Approver = m.Approver()
 	m.UseVim(*vimKeys)
 	m.UseAnimation(*animate)
@@ -213,7 +251,7 @@ func run() error {
 	return err
 }
 
-func openToolbox(mode string, allowOutside, noTools bool, allow, deny string) (*permission.Gate, []tool.Tool, error) {
+func openToolbox(cwd, mode string, allowOutside, noTools bool, allow, deny string) (*permission.Gate, []tool.Tool, error) {
 	parsed, err := permission.ParseMode(mode)
 	if err != nil {
 		return nil, nil, err
@@ -226,10 +264,6 @@ func openToolbox(mode string, allowOutside, noTools bool, allow, deny string) (*
 		return gate, nil, nil
 	}
 
-	cwd, err := os.Getwd()
-	if err != nil {
-		return nil, nil, err
-	}
 	workspace, err := tool.NewWorkspace(cwd)
 	if err != nil {
 		return nil, nil, err
@@ -243,19 +277,16 @@ func openToolbox(mode string, allowOutside, noTools bool, allow, deny string) (*
 
 // A server that will not start is worth saying so about, but not worth
 // refusing to run over.
-func openMCP(off bool, configPath string) (*mcp.Session, error) {
+func openMCP(off bool, configPath string, found []string) (*mcp.Session, error) {
 	if off {
 		return nil, nil
 	}
-	if configPath == "" {
-		path, err := mcp.ConfigPath()
-		if err != nil {
-			return nil, nil
-		}
-		configPath = path
+	// Naming a file means that file and no other.
+	if configPath != "" {
+		found = []string{configPath}
 	}
 
-	cfg, err := mcp.Load(configPath)
+	cfg, err := mcp.LoadAll(found...)
 	if err != nil {
 		return nil, err
 	}

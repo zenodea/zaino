@@ -28,8 +28,14 @@ type functionResponse struct {
 	Response map[string]any `json:"response"`
 }
 
+type blob struct {
+	MimeType string `json:"mimeType"`
+	Data     []byte `json:"data"`
+}
+
 type part struct {
 	Text             string            `json:"text,omitempty"`
+	InlineData       *blob             `json:"inlineData,omitempty"`
 	Thought          bool              `json:"thought,omitempty"`
 	ThoughtSignature string            `json:"thoughtSignature,omitempty"`
 	FunctionCall     *functionCall     `json:"functionCall,omitempty"`
@@ -182,6 +188,9 @@ func translateMessage(msg llm.Message, names map[string]string) (content, error)
 			if b.Text != "" {
 				out.Parts = append(out.Parts, part{Text: b.Text})
 			}
+
+		case llm.ImageBlock:
+			out.Parts = append(out.Parts, part{InlineData: &blob{MimeType: b.MediaType, Data: b.Data}})
 
 		case llm.ThinkingBlock:
 

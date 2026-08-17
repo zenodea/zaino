@@ -38,7 +38,7 @@ func (m *Model) refreshMenu() {
 		selected = m.menu.matches[m.menu.cursor].name
 	}
 
-	matches := matchCommands(strings.TrimPrefix(value, "/"))
+	matches := rankCommands(m.commands(), strings.TrimPrefix(value, "/"))
 	if len(matches) == 0 {
 		m.menu = menu{}
 		return
@@ -186,7 +186,7 @@ func (m *Model) menuView() string {
 		return ""
 	}
 	rows, cursor := m.window()
-	names, inner := menuColumns()
+	names, inner := m.menuColumns()
 	inner = min(inner, max(m.contentWidth()-2, 28))
 	summaries := max(inner-menuGutter-names, 8)
 
@@ -210,9 +210,9 @@ const menuGutter = 2 + 2 + 2
 
 // Sized off the whole registry, not the visible matches: every summary fits
 // whole, and the box holds still while the list narrows under the cursor.
-func menuColumns() (names, inner int) {
+func (m *Model) menuColumns() (names, inner int) {
 	summaries := 0
-	for _, c := range commandList() {
+	for _, c := range m.commands() {
 		names = max(names, len("/"+c.name))
 		summaries = max(summaries, len(c.summary))
 	}

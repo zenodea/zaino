@@ -1,6 +1,7 @@
 package session
 
 import (
+	"errors"
 	"strings"
 
 	"github.com/zenodea/zaino/internal/llm"
@@ -91,6 +92,47 @@ func (r *Recorder) Compact(summary string, kept []llm.Message) error {
 
 func isSummary(m llm.Message) bool {
 	return m.Role == llm.RoleUser && strings.HasPrefix(m.Text(), SummaryPrefix)
+}
+
+// Rewind takes the conversation back to its first keep messages and hangs
+// what comes next off that turn. Nothing is deleted: the turns left behind
+// stay in the file, on a branch of their own.
+func (r *Recorder) Rewind(keep int) error {
+	if r == nil {
+		return nil
+	}
+	r.pending = nil
+	if r.store == nil {
+		r.written = keep
+		return nil
+	}
+
+	entries, err := r.store.Entries()
+	if err != nil {
+		return err
+	}
+
+	marks := Build(entries).Marks
+	if keep >= len(marks) {
+		return nil
+	}
+	id := marks[keep]
+	if id == "" {
+		return errors.New("session: a folded-up conversation starts at its summary")
+	}
+
+	parent := ""
+	for _, e := range entries {
+		if e.ID == id {
+			parent = e.Parent
+			break
+		}
+	}
+	if err := r.store.SetLeaf(parent); err != nil {
+		return err
+	}
+	r.written = keep
+	return nil
 }
 
 func (r *Recorder) Clear() error {

@@ -23,7 +23,7 @@ type Config struct {
 	Servers map[string]Server `json:"servers"`
 }
 
-func ConfigPath() (string, error) { return paths.Data("mcp.json") }
+func ConfigPath() (string, error) { return paths.Config("mcp.json") }
 
 // A missing config is the normal case, not a failure.
 func Load(path string) (Config, error) {
@@ -40,6 +40,25 @@ func Load(path string) (Config, error) {
 		return Config{}, fmt.Errorf("%s: %w", path, err)
 	}
 	return cfg, nil
+}
+
+// Later files win a name outright: a project pointing "github" somewhere else
+// means that server, not both of them.
+func LoadAll(paths ...string) (Config, error) {
+	merged := Config{}
+	for _, path := range paths {
+		cfg, err := Load(path)
+		if err != nil {
+			return Config{}, err
+		}
+		for name, server := range cfg.Servers {
+			if merged.Servers == nil {
+				merged.Servers = map[string]Server{}
+			}
+			merged.Servers[name] = server
+		}
+	}
+	return merged, nil
 }
 
 func (c Config) Names() []string {

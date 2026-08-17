@@ -1,6 +1,10 @@
 package session
 
-import "github.com/zenodea/zaino/internal/llm"
+import (
+	"slices"
+
+	"github.com/zenodea/zaino/internal/llm"
+)
 
 // What a folded-up conversation is introduced with, so the model knows the
 // difference between a summary and something you said.
@@ -9,6 +13,11 @@ const SummaryPrefix = "Summary of the conversation so far:\n\n"
 type Context struct {
 	Messages []llm.Message
 	Summary  string
+
+	// The entry each message came from, one for one with Messages. A summary
+	// rebuilt from a compaction has no entry, and the empty mark it leaves is
+	// what says it cannot be gone back past.
+	Marks []string
 
 	Provider string
 	Model    string
@@ -20,10 +29,41 @@ type Context struct {
 	Usage llm.Usage
 }
 
+// The file holds a tree: a conversation taken up again from an earlier turn
+// leaves what it abandoned behind, still on disk. The path is the line from
+// the newest entry back to the root, and a file that never branched is all of
+// itself.
+func Path(entries []Entry) []Entry {
+	if len(entries) == 0 {
+		return nil
+	}
+
+	byID := make(map[string]Entry, len(entries))
+	for _, e := range entries {
+		byID[e.ID] = e
+	}
+
+	seen := map[string]bool{}
+	var out []Entry
+	for at := entries[len(entries)-1]; !seen[at.ID]; {
+		seen[at.ID] = true
+		out = append(out, at)
+		parent, ok := byID[at.Parent]
+		if !ok {
+			break
+		}
+		at = parent
+	}
+
+	slices.Reverse(out)
+	return out
+}
+
 // Settings come from every entry — a clear should not lose your model —
 // while messages come from the last clear onwards.
 func Build(entries []Entry) Context {
 	var c Context
+	entries = Path(entries)
 
 	// A summary is a boundary like a clear, except that what came before it
 	// is not forgotten so much as folded into one message.
@@ -39,6 +79,7 @@ func Build(entries []Entry) Context {
 	c.Summary = summary
 	if summary != "" {
 		c.Messages = append(c.Messages, llm.UserText(SummaryPrefix+summary))
+		c.Marks = append(c.Marks, "")
 	}
 
 	for _, e := range entries {
@@ -61,6 +102,7 @@ func Build(entries []Entry) Context {
 			continue
 		}
 		c.Messages = append(c.Messages, *e.Message)
+		c.Marks = append(c.Marks, e.ID)
 		if e.Usage != nil {
 			c.Usage.InputTokens += e.Usage.InputTokens
 			c.Usage.OutputTokens += e.Usage.OutputTokens

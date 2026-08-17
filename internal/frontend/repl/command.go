@@ -37,16 +37,30 @@ const help = `/help                list the commands
 /effort [level]      show or set output effort
 /thinking [on|off]   show or hide the model's reasoning
 /system [prompt|-]   show, set, or drop the system prompt
+/bro                 say the last answer again, simply
+/profile [name]      switch to a named bundle of settings
+/config              what the config files came to, and where they are
 /permission [mode]   show or set when tools stop to ask  (/perm, /mode)
 /tools               list the tools the model has
 /compact             fold the conversation so far into a summary
+/rewind [n]          take the conversation up again from an earlier turn
 /limit [tokens|off]  stop the session when the context passes a ceiling
 /usage               token usage for this session
 /sessions            list saved sessions      (/resume)
 /quit                leave zaino              (/exit, /q)`
 
+// What a command left behind. A command that touches the conversation has to
+// hand it back, since the loop holds it: saying so in the session file alone
+// would leave the record and the context saying different things.
+type outcome struct {
+	context []llm.Message
+	changed bool
+	quit    bool
+	send    string
+}
+
 func runCommand(ag *agent.Agent, line string, messages []llm.Message,
-	usage *llm.Usage, o Options) (cleared, quit bool) {
+	usage *llm.Usage, o Options) outcome {
 	notice := func(format string, args ...any) {
 		fmt.Fprintf(os.Stderr, "\x1b[2m"+format+"\x1b[0m\n", args...)
 	}
@@ -59,16 +73,16 @@ func runCommand(ag *agent.Agent, line string, messages []llm.Message,
 
 	switch name {
 	case "help", "h", "?":
-		notice("%s", help)
+		notice("%s", helpWith(o.Config))
 
 	case "quit", "exit", "q":
-		return false, true
+		return outcome{quit: true}
 
 	case "clear", "new", "reset":
 		*usage = llm.Usage{}
 		o.Recorder.Clear()
 		notice("context cleared")
-		return true, false
+		return outcome{changed: true}
 
 	case "model":
 		if arg == "" {
@@ -108,7 +122,7 @@ func runCommand(ag *agent.Agent, line string, messages []llm.Message,
 		o.Recorder.Append(session.Model(backend.Name(), ""))
 		o.Recorder.Clear()
 		notice("provider → %s · %s (context cleared)", backend.Name(), backend.DefaultModel())
-		return true, false
+		return outcome{changed: true}
 
 	case "effort":
 		switch {
@@ -198,7 +212,7 @@ func runCommand(ag *agent.Agent, line string, messages []llm.Message,
 			break
 		}
 		notice("compacted · %d messages kept", max(len(folded)-1, 0))
-		return false, false
+		return outcome{context: folded, changed: true}
 
 	case "limit":
 		if arg == "" {
@@ -255,10 +269,34 @@ func runCommand(ag *agent.Agent, line string, messages []llm.Message,
 		}
 		notice("%s", strings.Join(lines, "\n"))
 
+	case "rewind", "branch", "back":
+		trimmed, ok := rewind(ag, messages, arg, o, notice, fail)
+		if !ok {
+			break
+		}
+		return outcome{context: trimmed, changed: true}
+
+	case "config":
+		notice("%s", describeConfig(ag, o))
+
+	case "profile":
+		if err := useProfile(ag, arg, o); err != nil {
+			fail("%s", err)
+		} else if arg != "" {
+			notice("profile → %s", arg)
+		}
+
 	default:
+		if c, ok := findPrompt(o.Config, name); ok {
+			if c.Nothing != "" && !answered(messages) {
+				notice("%s", c.Nothing)
+				break
+			}
+			return outcome{send: c.Expand(arg)}
+		}
 		fail("unknown command /%s — try /help", name)
 	}
-	return false, false
+	return outcome{}
 }
 
 // setupHint says how to give a provider credentials without typing a secret
