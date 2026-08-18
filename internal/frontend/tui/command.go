@@ -111,6 +111,18 @@ func commandList() []command {
 			run:     cmdRewind,
 		},
 		{
+			name:    "journey",
+			aliases: []string{"tree"},
+			summary: "the tree of turns, every branch left behind included",
+			run:     cmdJourney,
+		},
+		{
+			name:    "agents",
+			aliases: []string{"tasks"},
+			summary: "the child agents spawned this session, and a way into each",
+			run:     cmdAgents,
+		},
+		{
 			name:    "compact",
 			summary: "fold the conversation so far into a summary",
 			run:     cmdCompact,

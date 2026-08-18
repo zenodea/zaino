@@ -57,6 +57,8 @@ func (m *Model) animating() bool {
 		len(m.chooser.trail) > 0 || m.chooser.fill < m.fillTarget()):
 	case m.menu.open && (m.menu.barAt != m.menu.barTo || len(m.menu.trail) > 0):
 	case m.picker.open && (m.picker.barAt != m.picker.barTo || len(m.picker.trail) > 0):
+	case m.journey.open && (m.journey.barAt != m.journey.barTo || len(m.journey.trail) > 0):
+	case m.agents.open && (m.agents.barAt != m.agents.barTo || len(m.agents.trail) > 0):
 	default:
 		return false
 	}
@@ -157,6 +159,12 @@ func (m *Model) step() tea.Cmd {
 		working = true
 	}
 	if m.advancePickerBar() {
+		working = true
+	}
+	if m.advanceJourneyBar() {
+		working = true
+	}
+	if m.advanceAgentsBar() {
 		working = true
 	}
 	if m.advanceMenuBar() {

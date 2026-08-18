@@ -10,22 +10,21 @@ export const installs = [
 ];
 
 export const nav = [
-  { href: '#pack', label: "what's built" },
-  { href: '#specs', label: 'specs' },
+  { href: '#pack', label: 'the pack' },
   { href: '#reach', label: 'tools' },
   { href: '#pockets', label: 'pockets' },
-  { href: '#care', label: 'rules' },
+  { href: '#journey', label: 'journey' },
   { href: '#drive', label: 'commands' }
 ];
 
 export const packParts = [
-  { part: 'The lid', feat: 'two hand-rolled clients' },
+  { part: 'The lid', feat: 'five hand-rolled clients' },
   { part: 'Main compartment', feat: 'the turn loop' },
   { part: 'Front pocket', feat: 'eight tools' },
   { part: 'Haul loop', feat: 'one binary, no runtime' },
   { part: 'The buckle', feat: 'asks before it acts' },
   { part: 'Side pocket', feat: 'MCP, over stdio' },
-  { part: 'Reinforced base', feat: '276 tests' }
+  { part: 'Reinforced base', feat: 'tested throughout' }
 ];
 
 export const tools = ['read', 'write', 'edit', 'bash', 'grep', 'find', 'ls', 'fetch'];
@@ -42,7 +41,7 @@ export const permissionModes = [
   },
   {
     name: 'plan',
-    desc: 'Read only. Nothing written or run — but pages can still be read.'
+    desc: 'Read only. Nothing written or run, but pages can still be read.'
   },
   {
     name: 'bypass',
@@ -61,15 +60,21 @@ export const commands = [
     ['/effort', 'show or set output effort'],
     ['/thinking', "show or hide the model's reasoning"],
     ['/system', 'show, set, or drop the system prompt'],
-    ['/compact', 'fold the conversation into a summary']
+    ['/profile', 'switch to a named bundle of settings'],
+    ['/config', 'what the config files came to'],
+    ['/compact', 'fold the conversation into a summary'],
+    ['/limit', 'stop when the context passes a ceiling']
   ],
   [
+    ['/rewind', 'take it up again from an earlier turn'],
+    ['/journey', 'the tree of turns, every branch included'],
     ['/permission', 'when tools stop to ask'],
     ['/tools', 'list the tools the model has'],
     ['/usage', 'token usage for this session'],
     ['/sessions', 'pick up an earlier conversation'],
-    ['/help', 'list the commands'],
     ['/vim', 'modal editing in the composer'],
+    ['/bro', 'say the last answer again, simply'],
+    ['/help', 'list the commands'],
     ['/quit', 'leave zaino']
   ]
 ];

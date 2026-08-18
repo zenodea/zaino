@@ -62,9 +62,8 @@
   }
   .brand-mark {
     font-size: 19px; display: inline-block;
-    rotate: -8deg; transition: rotate .3s cubic-bezier(.2,.6,.2,1), scale .3s cubic-bezier(.2,.6,.2,1);
+    rotate: -8deg;
   }
-  .brand:hover .brand-mark { rotate: 6deg; scale: 1.12; }
 
   .strap-links { margin-left: auto; display: flex; gap: 20px; font-size: 14px; }
   .strap-links a {

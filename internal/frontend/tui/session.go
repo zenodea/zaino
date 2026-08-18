@@ -23,52 +23,59 @@ func (m *Model) UseWireLog(w *wirelog.Log) { m.wire = w }
 func (m *Model) Restore(c session.Context) {
 	m.messages = c.Messages
 	m.sessionUsage = c.Usage
-	m.entries = nil
+	m.entries = transcribeMessages(c.Messages)
 	m.rendered = nil
+	m.rebuildTasks(c.Tasks)
 
-	for _, msg := range c.Messages {
-		m.transcribe(msg)
-	}
 	m.rerender()
 	m.syncViewport()
 }
 
-func (m *Model) transcribe(msg llm.Message) {
-	for _, block := range msg.Content {
-		switch b := block.(type) {
-		case llm.TextBlock:
-			if strings.TrimSpace(b.Text) == "" {
-				continue
-			}
-			kind := entryAssistant
-			if msg.Role == llm.RoleUser {
-				kind = entryUser
-			}
-			m.entries = append(m.entries, entry{kind: kind, text: b.Text})
+func transcribeMessages(msgs []llm.Message) []entry {
+	var entries []entry
+	for _, msg := range msgs {
+		for _, block := range msg.Content {
+			switch b := block.(type) {
+			case llm.TextBlock:
+				if strings.TrimSpace(b.Text) == "" {
+					continue
+				}
+				kind := entryAssistant
+				if msg.Role == llm.RoleUser {
+					kind = entryUser
+				}
+				entries = append(entries, entry{kind: kind, text: b.Text})
 
-		case llm.ToolUseBlock:
-			m.entries = append(m.entries, entry{
-				kind:      entryTool,
-				toolName:  b.Name,
-				toolArgs:  compactArgs(b.Input, argsLimit),
-				toolInput: string(b.Input),
-				done:      true,
-			})
+			case llm.ToolUseBlock:
+				entries = append(entries, entry{
+					kind:      entryTool,
+					toolName:  b.Name,
+					toolID:    b.ID,
+					toolArgs:  compactArgs(b.Input, argsLimit),
+					toolInput: string(b.Input),
+					done:      true,
+				})
 
-		case llm.ToolResultBlock:
-			m.closeRestoredTool(b)
+			case llm.ToolResultBlock:
+				closeRestoredTool(entries, b)
+			}
 		}
 	}
+	return entries
 }
 
-func (m *Model) closeRestoredTool(result llm.ToolResultBlock) {
-	for i := len(m.entries) - 1; i >= 0; i-- {
-		if m.entries[i].kind != entryTool || m.entries[i].resultLen > 0 {
+func closeRestoredTool(entries []entry, result llm.ToolResultBlock) {
+	for i := len(entries) - 1; i >= 0; i-- {
+		e := entries[i]
+		if e.kind != entryTool || e.resultLen > 0 {
 			continue
 		}
-		m.entries[i].failed = result.IsError
-		m.entries[i].resultLen = len(result.Content)
-		m.entries[i].toolResult = result.Content
+		if e.toolID != "" && result.ToolUseID != "" && e.toolID != result.ToolUseID {
+			continue
+		}
+		entries[i].failed = result.IsError
+		entries[i].resultLen = len(result.Content)
+		entries[i].toolResult = result.Content
 		return
 	}
 }

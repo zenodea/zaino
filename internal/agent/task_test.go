@@ -73,6 +73,92 @@ func TestTaskKeepsItsWorkOutOfTheParent(t *testing.T) {
 	}
 }
 
+func TestTaskHooksTagTheChild(t *testing.T) {
+	ag, _ := newTestAgent(t,
+		taskTurn("look around"),
+		oneToolTurn("echo"),
+		textTurn("saw it"),
+		textTurn("done"),
+	)
+
+	var mu sync.Mutex
+	var info TaskInfo
+	var childCalls, parentChildCalls []string
+	var doneID string
+	var doneHistory []llm.Message
+
+	ag.Tools = []tool.Tool{TaskTool(ag), stubTool("echo")}
+	ag.Gate = &permission.Gate{Policy: permission.NewPolicy(permission.Bypass)}
+	ag.Hooks = Hooks{
+		OnToolCall: func(call llm.ToolUseBlock) {
+			mu.Lock()
+			defer mu.Unlock()
+			if call.Name != "task" {
+				parentChildCalls = append(parentChildCalls, call.Name)
+			}
+		},
+		OnTask: func(i TaskInfo) Hooks {
+			mu.Lock()
+			info = i
+			mu.Unlock()
+			return Hooks{OnToolCall: func(call llm.ToolUseBlock) {
+				mu.Lock()
+				defer mu.Unlock()
+				childCalls = append(childCalls, call.Name)
+			}}
+		},
+		OnTaskDone: func(id string, history []llm.Message, err error) {
+			mu.Lock()
+			defer mu.Unlock()
+			doneID, doneHistory = id, history
+		},
+	}
+
+	if _, err := ag.Run(context.Background(), []llm.Message{llm.UserText("go")}); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	if info.ID != "toolu_t" || info.Description != "look" || info.Depth != 1 {
+		t.Errorf("info = %+v, want the task call's ID, description and depth 1", info)
+	}
+	if info.Cancel == nil {
+		t.Error("info.Cancel is nil — one child cannot be stopped on its own")
+	}
+	if len(childCalls) != 1 || childCalls[0] != "echo" {
+		t.Errorf("child hooks saw %v, want the child's echo call", childCalls)
+	}
+	if len(parentChildCalls) != 0 {
+		t.Errorf("the parent's hooks saw the child's calls: %v", parentChildCalls)
+	}
+	if doneID != "toolu_t" || len(doneHistory) != 4 {
+		t.Errorf("done: id = %q, %d messages — want toolu_t and the child's 4", doneID, len(doneHistory))
+	}
+}
+
+func TestTaskCancelStopsOnlyThatChild(t *testing.T) {
+	ag, _ := newTestAgent(t,
+		taskTurn("dig forever"),
+		textTurn("the parent carries on"),
+	)
+	ag.Tools = []tool.Tool{TaskTool(ag)}
+	ag.Gate = &permission.Gate{Policy: permission.NewPolicy(permission.Bypass)}
+	ag.Hooks = Hooks{OnTask: func(i TaskInfo) Hooks {
+		i.Cancel()
+		return Hooks{}
+	}}
+
+	history, err := ag.Run(context.Background(), []llm.Message{llm.UserText("go")})
+	if err != nil {
+		t.Fatalf("Run: %v — cancelling a child must not end the turn", err)
+	}
+	result := lastResult(t, history)
+	if !result.IsError {
+		t.Errorf("result = %+v, want the cancelled task reported as an error", result)
+	}
+}
+
 func TestTaskRefusesToNestForever(t *testing.T) {
 	ag, _ := newTestAgent(t, textTurn("ok"))
 	deep := &Task{parent: ag, depth: maxTaskDepth}

@@ -15,10 +15,10 @@
     >
       <title id="packttl">
         A backpack, with each part labelled as a part of zaino: the lid
-        is two hand-rolled provider clients, the main compartment is the
+        is five hand-rolled provider clients, the main compartment is the
         turn loop, the front pocket is eight tools, the buckle is
         permission, the side pocket is MCP servers, and the reinforced
-        base is 276 tests.
+        base is the test suite.
       </title>
   
       <path class="strapline" d="M300 200 C 250 250 245 360 275 430" />
@@ -125,7 +125,7 @@
           THE LID
         </text>
         <text class="feat" x="188" y="164" text-anchor="end">
-          two hand-rolled clients
+          five hand-rolled clients
         </text>
   
         <path class="lead" pathLength="1" d="M196 300 H 244 L 292 288" />
@@ -164,10 +164,10 @@
         <path class="lead" pathLength="1" d="M564 452 H 512 L 466 466" />
         <circle class="dot" cx="466" cy="466" r="5" />
         <text class="part" x="572" y="440">REINFORCED BASE</text>
-        <text class="feat" x="572" y="464">276 tests</text>
+        <text class="feat" x="572" y="464">tested throughout</text>
       </g>
     </svg>
-    <figcaption>fig. 1 — the pack, from the outside</figcaption>
+    <figcaption>fig. 1: the pack, from the outside</figcaption>
   </figure>
 
   <!-- Same labels as the leader lines, for when the callouts are hidden. -->

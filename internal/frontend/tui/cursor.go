@@ -62,6 +62,11 @@ func (m *Model) toggleSelected() bool {
 		return true
 	}
 
+	if _, spawned := m.taskIndex[e.toolID]; spawned && e.kind == entryTool {
+		m.openTaskView(e.toolID)
+		return true
+	}
+
 	m.entries[m.cursor].expanded = !e.expanded
 	m.rerender()
 	m.showCursor()

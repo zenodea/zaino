@@ -10,14 +10,14 @@
     <h2 class="big">Driving it</h2>
     <p class="sub">
       A line starting with <code>/</code> acts on the session instead of going to
-      the model. A prompt that merely starts with a slash —
-      <code>/etc/hosts is wrong</code> — is still a prompt, and the panel knows
+      the model. A prompt that merely starts with a slash
+      (<code>/etc/hosts is wrong</code>) is still a prompt, and the panel knows
       it.
     </p>
     <p class="sub">
       A command that takes a value and is given none asks instead of explaining:
       it opens a list with what is currently in effect marked. Passing the value
-      outright — <code>/effort low</code> — skips it.
+      outright (<code>/effort low</code>) skips it.
     </p>
 
     <div class="cmds">
@@ -75,7 +75,7 @@
         <p>
           A session is one append-only file of things that happened. What gets
           sent is worked out from that record, so clearing just marks where the
-          context starts — the transcript before it stays readable.
+          context starts; the transcript before it stays readable.
         </p>
       </Note>
 
@@ -91,7 +91,7 @@
       <Note>
         {#snippet title()}Stopping, and leaving{/snippet}
         <p>
-          <kbd>esc</kbd> stops a running turn — but only once vim has nothing
+          <kbd>esc</kbd> stops a running turn, but only once vim has nothing
           else for it to do. <kbd>⌃c</kbd> stops it too; with nothing running it
           arms the quit and says so in the footer, and any other key stands it
           down.

@@ -21,51 +21,35 @@
       <li class="hand">task</li>
     </ul>
 
-    <div class="notes">
+    <div class="duo">
       <Note>
-        {#snippet title()}<code>task</code> — a second agent{/snippet}
+        {#snippet title()}<code>task</code>: a second agent{/snippet}
         <p>
           It runs with its own conversation and hands back only what it
-          concluded. A search that reads twenty files costs this conversation one
-          paragraph instead of twenty file contents, which is what keeps a long
-          session inside the window.
+          concluded. A search that reads twenty files costs this conversation
+          one paragraph instead of twenty file contents.
         </p>
         <p>
           The child inherits the parent's gate, so it is not a way around a
-          refusal — same policy, same approver. It cannot ask you anything
+          refusal: same policy, same approver. It cannot ask you anything
           itself, so the prompt has to carry everything it needs. Nesting stops
           two deep.
         </p>
       </Note>
 
-      <Note>
-        {#snippet title()}MCP, over stdio{/snippet}
+      <div class="margin-notes">
         <p>
-          Servers are declared in <code>mcp.json</code>, spawned on stdio and
-          asked what they can do. Their tools arrive named
-          <code>server__tool</code>, so two servers offering <code>search</code>
-          stay apart.
+          <b>MCP</b> servers plug in over stdio, declared in
+          <code>mcp.json</code>. Their tools arrive named
+          <code>server__tool</code> and ask for approval like anything else
+          that leaves the process.
         </p>
         <p>
-          A server that will not start is reported and skipped rather than taken
-          as fatal. Nothing is known about what a server does, so its tools ask
-          for approval like anything else that leaves the process.
+          <b>fetch</b> returns a page with the markup stripped. It leaves the
+          process too, so <code>manual</code> and <code>accept-edits</code>
+          both stop to ask first.
         </p>
-      </Note>
-
-      <Note>
-        {#snippet title()}<code>fetch</code> — a URL, as text{/snippet}
-        <p>
-          It gets a page and returns it with the markup stripped from the HTML.
-          It is the tool that lets the model check what an API actually
-          documents, rather than what it remembers about it.
-        </p>
-        <p>
-          Because it leaves the process, it has a permission action of its own:
-          <code>manual</code> and <code>accept-edits</code> both stop to ask
-          before anything is fetched.
-        </p>
-      </Note>
+      </div>
     </div>
   </div>
 </section>
@@ -91,4 +75,18 @@
   }
   .chips li:hover { translate: -1px -2px; rotate: -1.5deg; box-shadow: 4px 5px 0 var(--shadow); }
   .chips li.hand { background: var(--mustard); font-weight: 700; }
+
+  .duo {
+    display: grid; grid-template-columns: 1.1fr 1fr;
+    gap: 26px 34px; align-items: start; margin-top: 46px;
+  }
+  @media (max-width: 900px) { .duo { grid-template-columns: 1fr; } }
+
+  .margin-notes p {
+    margin: 0; padding: 12px 2px;
+    font-size: 14.5px; color: var(--ink-2);
+    border-bottom: 2px dotted color-mix(in oklab, var(--ink) 28%, transparent);
+  }
+  .margin-notes p:first-child { padding-top: 4px; }
+  .margin-notes b { font-family: var(--mono); font-size: 13px; color: var(--rust); }
 </style>

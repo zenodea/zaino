@@ -135,6 +135,26 @@ func (r *Recorder) Rewind(keep int) error {
 	return nil
 }
 
+// Jump moves recording to any entry in the tree — where Rewind walks back
+// along the current path, Jump crosses to a branch that was left behind.
+// written is how many messages the caller has rebuilt on the way there, so
+// the next Messages call appends only what is new.
+func (r *Recorder) Jump(leaf string, written int) error {
+	if r == nil {
+		return nil
+	}
+	r.pending = nil
+	if r.store == nil {
+		r.written = written
+		return nil
+	}
+	if err := r.store.SetLeaf(leaf); err != nil {
+		return err
+	}
+	r.written = written
+	return nil
+}
+
 func (r *Recorder) Clear() error {
 	if r == nil {
 		return nil

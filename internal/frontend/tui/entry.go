@@ -25,6 +25,7 @@ type entry struct {
 	text string
 
 	toolName  string
+	toolID    string
 	toolArgs  string
 	done      bool
 	failed    bool
@@ -33,6 +34,8 @@ type entry struct {
 	toolInput  string
 	toolResult string
 	expanded   bool
+
+	taskNote string
 }
 
 func (e entry) marker() (string, lipgloss.Style) {
@@ -197,6 +200,9 @@ func prettyJSON(raw string) string {
 
 func (e entry) toolLine(width int) string {
 	left := fmt.Sprintf("%-6s %s", e.toolName, e.toolSummary())
+	if e.taskNote != "" {
+		left += metaStyle.Render(" · " + e.taskNote)
+	}
 	right := e.toolStatus()
 
 	gap := width - lipgloss.Width(left) - lipgloss.Width(right)
@@ -231,6 +237,12 @@ func (e entry) toolSummary() string {
 			}
 		}
 		return ""
+	}
+
+	if e.toolName == "task" {
+		if what := text("description", "agent"); what != "" {
+			return what
+		}
 	}
 
 	switch main := text("path", "command", "pattern"); {

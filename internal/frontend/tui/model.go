@@ -61,6 +61,7 @@ type Model struct {
 	spinner  spinner.Model
 	menu     menu
 	picker   picker
+	journey  journey
 	chooser  chooser
 	sheet    sheet
 	secret   secret
@@ -78,6 +79,10 @@ type Model struct {
 	entries  []entry
 	rendered []string
 	messages []llm.Message
+
+	tasks     []*task
+	taskIndex map[string]*task
+	agents    agentsBoard
 
 	events chan tea.Msg
 	cancel context.CancelFunc
@@ -134,14 +139,16 @@ func New(ag *agent.Agent, providerName string) *Model {
 	sp := spinner.New(spinner.WithSpinner(spinner.MiniDot), spinner.WithStyle(spinnerStyle))
 
 	return &Model{
-		agent:    ag,
-		provider: providerName,
-		input:    input,
-		spinner:  sp,
-		rec:      session.NewRecorder(nil),
-		events:   make(chan tea.Msg, 64),
-		cursor:   -1,
-		motion:   motion{barAt: -1, barTo: -1},
+		agent:     ag,
+		provider:  providerName,
+		input:     input,
+		spinner:   sp,
+		rec:       session.NewRecorder(nil),
+		events:    make(chan tea.Msg, 64),
+		cursor:    -1,
+		motion:    motion{barAt: -1, barTo: -1},
+		taskIndex: map[string]*task{},
+		agents:    agentsBoard{viewing: -1},
 	}
 }
 
@@ -184,6 +191,7 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.push(entry{
 			kind:      entryTool,
 			toolName:  msg.Call.Name,
+			toolID:    msg.Call.ID,
 			toolArgs:  compactArgs(msg.Call.Input, argsLimit),
 			toolInput: string(msg.Call.Input),
 		})
@@ -191,6 +199,18 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case toolResultMsg:
 		m.completeTool(msg)
+		return m, m.waitForEvent()
+
+	case taskStartMsg:
+		m.startTask(msg)
+		return m, m.waitForEvent()
+
+	case taskMsg:
+		m.taskEvent(msg.id, msg.msg)
+		return m, m.waitForEvent()
+
+	case taskDoneMsg:
+		m.finishTask(msg)
 		return m, m.waitForEvent()
 
 	case modelsMsg:
@@ -233,6 +253,15 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.movePicker(-1)
 			case tea.MouseButtonWheelDown:
 				m.movePicker(1)
+			}
+			return m, nil
+		}
+		if m.journey.open {
+			switch msg.Button {
+			case tea.MouseButtonWheelUp:
+				m.moveJourney(-1)
+			case tea.MouseButtonWheelDown:
+				m.moveJourney(1)
 			}
 			return m, nil
 		}
@@ -290,6 +319,16 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if m.picker.open {
 		m.quitArmed = false
 		return m, m.handlePickerKey(msg)
+	}
+
+	if m.journey.open {
+		m.quitArmed = false
+		return m, m.handleJourneyKey(msg)
+	}
+
+	if m.agents.open {
+		m.quitArmed = false
+		return m, m.handleAgentsKey(msg)
 	}
 
 	if m.sheet.open {
@@ -513,6 +552,13 @@ func (m *Model) hooks(ctx context.Context) agent.Hooks {
 		OnCompact: func(summary string, kept []llm.Message) {
 			emit(compactMsg{Summary: summary, Kept: kept})
 		},
+		OnTask: func(info agent.TaskInfo) agent.Hooks {
+			emit(taskStartMsg{info: info})
+			return m.taskHooks(emit, info)
+		},
+		OnTaskDone: func(id string, history []llm.Message, err error) {
+			emit(taskDoneMsg{id: id, history: history, failed: err != nil})
+		},
 	}
 }
 
@@ -562,6 +608,9 @@ func (m *Model) clearContext() {
 	m.rendered = nil
 	m.cursor = -1
 	m.sessionUsage = llm.Usage{}
+	m.tasks = nil
+	m.taskIndex = map[string]*task{}
+	m.agents = agentsBoard{viewing: -1}
 }
 
 func (m *Model) push(e entry) {
@@ -581,20 +630,31 @@ func (m *Model) appendToOpenEntry(kind entryKind, text string) {
 }
 
 func (m *Model) completeTool(msg toolResultMsg) {
-	for i := len(m.entries) - 1; i >= 0; i-- {
-		e := m.entries[i]
-		if e.kind != entryTool || e.done || e.toolName != msg.Call.Name {
-			continue
-		}
-		e.done = true
-		e.failed = msg.IsError
-		e.resultLen = len(msg.Result)
-		e.toolResult = msg.Result
-		m.entries[i] = e
-		m.rendered[i] = e.render(m.contentWidth())
-		m.syncViewport()
+	at := completeEntry(m.entries, msg)
+	if at < 0 {
 		return
 	}
+	m.rendered[at] = m.entries[at].render(m.contentWidth())
+	m.syncViewport()
+}
+
+// Matched by tool-use ID: several calls of the same tool can be in flight.
+func completeEntry(entries []entry, msg toolResultMsg) int {
+	for i := len(entries) - 1; i >= 0; i-- {
+		e := entries[i]
+		if e.kind != entryTool || e.done {
+			continue
+		}
+		if e.toolID != msg.Call.ID && !(e.toolID == "" && e.toolName == msg.Call.Name) {
+			continue
+		}
+		entries[i].done = true
+		entries[i].failed = msg.IsError
+		entries[i].resultLen = len(msg.Result)
+		entries[i].toolResult = msg.Result
+		return i
+	}
+	return -1
 }
 
 func (m *Model) syncViewport() {
@@ -715,6 +775,12 @@ func (m *Model) rerender() {
 	for _, e := range m.entries {
 		m.rendered = append(m.rendered, e.render(width))
 	}
+	for _, t := range m.tasks {
+		t.rendered = t.rendered[:0]
+		for _, e := range t.entries {
+			t.rendered = append(t.rendered, e.render(width))
+		}
+	}
 	m.syncViewport()
 }
 
@@ -793,6 +859,26 @@ func (m *Model) View() string {
 			pad.Render(m.pickerView()),
 			pad.Render(rule(m.contentWidth())),
 			pad.Render(m.pickerFooter()),
+		}, "\n")
+	}
+
+	if m.journey.open {
+		return strings.Join([]string{
+			pad.Render(m.header()),
+			"",
+			pad.Render(m.journeyView()),
+			pad.Render(rule(m.contentWidth())),
+			pad.Render(m.journeyFooter()),
+		}, "\n")
+	}
+
+	if m.agents.open {
+		return strings.Join([]string{
+			pad.Render(m.header()),
+			"",
+			pad.Render(m.agentsView()),
+			pad.Render(rule(m.contentWidth())),
+			pad.Render(m.agentsFooter()),
 		}, "\n")
 	}
 
@@ -909,6 +995,12 @@ func (m *Model) hints() []string {
 	case m.pending != nil:
 		return []string{"waiting on you · y allow · a session · n refuse", "y · a · n"}
 
+	case m.streaming && m.runningTasks() > 0:
+		return []string{fmt.Sprintf("working %s · %s out · /agents watches them · ⌃c stop",
+			time.Since(m.startedAt).Round(time.Second), plural(m.runningTasks(), "agent")),
+			fmt.Sprintf("%s out · /agents · ⌃c stop", plural(m.runningTasks(), "agent")),
+			"⌃c stop"}
+
 	case m.streaming:
 		return []string{fmt.Sprintf("working %s · ⌃c stop",
 			time.Since(m.startedAt).Round(time.Second)), "⌃c stop"}
@@ -935,6 +1027,15 @@ func (m *Model) hints() []string {
 		}
 
 	case m.cursor >= 0:
+		if e, ok := m.selectedEntry(); ok && e.kind == entryTool {
+			if _, spawned := m.taskIndex[e.toolID]; spawned {
+				return []string{
+					"⏎ walk into the agent · ⌃j⌃k move · type to go back to the composer",
+					"⏎ walk in · ⌃j⌃k move",
+					"⏎ walk in",
+				}
+			}
+		}
 		return []string{
 			"⏎ expand · ⌃j⌃k move · type to go back to the composer",
 			"⏎ expand · ⌃j⌃k move",
@@ -994,6 +1095,9 @@ func (m *Model) status() string {
 			style = vimVisualChip
 		}
 		chips = append(chips, style.Render(m.modeName()))
+	}
+	if n := m.runningTasks(); n > 0 {
+		chips = append(chips, agentChip.Render("⚒ "+plural(n, "agent")))
 	}
 	if len(chips) == 0 {
 		return ""

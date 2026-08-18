@@ -16,6 +16,17 @@ const (
 	maxTaskDepth     = 2
 )
 
+// TaskInfo describes a spawned child. ID is the task call's own tool-use ID;
+// Cancel stops this child without touching the turn.
+type TaskInfo struct {
+	ID          string
+	Description string
+	Agent       string
+	Model       string
+	Depth       int
+	Cancel      context.CancelFunc
+}
+
 // Task runs a nested loop with its own context and hands back only what it
 // concluded. The point is the context: a search that reads twenty files costs
 // the parent one paragraph instead of twenty file contents.
@@ -117,6 +128,9 @@ func (c *taskCall) Request() permission.Request {
 }
 
 func (c *taskCall) Run(ctx context.Context) (string, error) {
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
 	child := &Agent{
 		Provider:  c.parent.Provider,
 		Model:     orDefault(c.agent.Model, c.parent.Model),
@@ -128,7 +142,18 @@ func (c *taskCall) Run(ctx context.Context) (string, error) {
 		Thinking:  c.parent.Thinking,
 		Gate:      c.parent.Gate,
 		MaxTurns:  orDefault(c.parent.TaskTurns, DefaultTaskTurns),
-		Hooks:     Hooks{OnToolCall: c.parent.Hooks.OnToolCall, OnToolResult: c.parent.Hooks.OnToolResult},
+	}
+
+	info := TaskInfo{
+		ID:          tool.CallID(ctx),
+		Description: c.what,
+		Agent:       c.agent.Name,
+		Model:       child.Model,
+		Depth:       c.depth + 1,
+		Cancel:      cancel,
+	}
+	if on := c.parent.Hooks.OnTask; on != nil {
+		child.Hooks = on(info)
 	}
 
 	tools, err := c.agent.toolbox(c.parent.Tools)
@@ -138,6 +163,9 @@ func (c *taskCall) Run(ctx context.Context) (string, error) {
 	child.Tools = deepen(tools, child, c.depth+1)
 
 	history, err := child.Run(ctx, []llm.Message{llm.UserText(c.prompt)})
+	if done := c.parent.Hooks.OnTaskDone; done != nil {
+		done(info.ID, history, err)
+	}
 	if err != nil {
 		return "", fmt.Errorf("%s: %w", c.what, err)
 	}

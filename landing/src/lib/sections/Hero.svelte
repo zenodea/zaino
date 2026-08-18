@@ -8,15 +8,15 @@
   <div class="wrap hero-grid">
     <div class="hero-copy" data-stagger use:reveal>
       <p class="sticker">
-        🇮🇹 <b>zaino</b> <span class="ipa">/ˈdzai̯.no/</span> — <i>noun.</i> backpack
+        🇮🇹 <b>zaino</b> <span class="ipa">/ˈdzai̯.no/</span> · <i>noun.</i> backpack
       </p>
 
       <h1>An agent harness<br />you can <em>carry.</em></h1>
 
       <p class="lede">
-        Two provider clients written by hand, eight tools, subagents, MCP and a
-        vim-style composer. It compiles to a single binary, and it asks before it
-        writes or runs anything.
+        Five providers, eight tools, subagents and MCP in one Go binary, and
+        not an SDK in it. It asks before it writes or runs anything, and keeps
+        every road a conversation ever took.
       </p>
 
       <Install />
@@ -45,11 +45,6 @@
     padding: 5px 12px 8px; margin-bottom: 26px;
     transform: rotate(-1.4deg);
     box-shadow: 3px 3px 0 var(--shadow);
-  }
-  .sticker:hover { animation: peel .5s ease-in-out; }
-  @keyframes peel {
-    30% { transform: rotate(.8deg) translateY(-2px); }
-    65% { transform: rotate(-2.2deg); }
   }
   .sticker .ipa { opacity: .7; }
   .sticker b { font-weight: 700; }

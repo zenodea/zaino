@@ -12,8 +12,8 @@
 #       --purge       remove the binary and ~/.local/share/zaino
 #   -h, --help        this
 #
-# Environment: ZAINO_INSTALL_DIR, ZAINO_REF, ZAINO_REPO, ZAINO_NO_ANIM, NO_COLOR,
-# GOFLAGS.
+# Environment: ZAINO_INSTALL_DIR, ZAINO_REF, ZAINO_REPO, ZAINO_NO_ANIM,
+# ZAINO_ANIM_H (cap the pack's height in rows), NO_COLOR, GOFLAGS.
 
 set -eu
 
@@ -35,11 +35,21 @@ ACTION=install
 ANIM=yes
 TMP=
 CURSOR_HIDDEN=
+TTY_SAVED=
 SRC_LOCAL=
 ESC=
 UTF=no
 HEAD_H=3
 FOOT_H=2
+HUD_GUT=3
+# Tenths: the frame is 1.6 cells wide per cell of height. The pack's drawn width
+# follows the frame's height, not its width — widening the frame only buys empty
+# columns — so this is the narrowest frame the pack still turns inside of.
+ANIM_RATIO=16
+# The pack scales with the window, but only to here. Past it the thing stops
+# reading as an illustration and starts reading as wallpaper.
+ANIM_MAX_H=20
+ANIM_PAD=0
 COLS=$(tput cols 2>/dev/null || echo 80)
 
 say() { printf '%s\n' "$*"; }
@@ -121,9 +131,18 @@ header() {
 # Every width of the zipper is spelled out up front: the draw loop has no time
 # to build strings a character at a time, and no arrays to keep them in.
 zip_build() {
-  BARW=$((ANIM_W - 4))
+  # anim_ok sizes the zipper first and hangs the pack off it; without it (no
+  # animation, no layout pass) fall back to the terminal.
+  [ -n "${BARW:-}" ] || BARW=$((COLS - 2 * HUD_GUT))
   [ "$BARW" -gt 62 ] && BARW=62
   [ "$BARW" -lt 16 ] && BARW=16
+
+  HUD_IND=
+  i=0
+  while [ "$i" -lt "$HUD_GUT" ]; do
+    HUD_IND=$HUD_IND' '
+    i=$((i + 1))
+  done
 
   if [ "$UTF" = yes ]; then
     ZT='╫' ZS='█' ZS2='▓'
@@ -146,14 +165,16 @@ draw_hud() {
   eval "zc=\$ZC_$n"
   [ "$n" -lt "$BARW" ] && slide=$5 || slide=
 
-  printf '\033[2K   %s%s%s%s%s\n' "$C_TEETH" "$zc" "$C_HOT" "$slide" "$C_OFF"
-  printf '\033[2K   %s%3s%%%s  %s%s%s  %s%s%s\n' \
-    "$C_HOT" "$1" "$C_OFF" "$4" "$2" "$C_OFF" "$C_DIM" "$3" "$C_OFF"
+  printf '\033[2K%s%s%s%s%s%s\n' \
+    "$HUD_IND" "$C_TEETH" "$zc" "$C_HOT" "$slide" "$C_OFF"
+  printf '\033[2K%s%s%3s%%%s  %s%s%s  %s%s%s\n' \
+    "$HUD_IND" "$C_HOT" "$1" "$C_OFF" "$4" "$2" "$C_OFF" "$C_DIM" "$3" "$C_OFF"
 }
 
 # Every step must tolerate failure: under set -e, killing an already-dead process
 # would abandon the rest of the cleanup and take the exit status with it.
 cleanup() {
+  if [ -n "$TTY_SAVED" ]; then stty "$TTY_SAVED" </dev/tty 2>/dev/null || true; fi
   if [ -n "$CURSOR_HIDDEN" ]; then printf '\033[?25h'; fi
   if [ -n "${KEY_PID:-}" ]; then kill "$KEY_PID" 2>/dev/null || true; fi
   if [ -n "$TMP" ]; then rm -rf "$TMP"; fi
@@ -348,6 +369,11 @@ BEGIN {
 
 	PI = 3.14159265358979
 	ESC = sprintf("%c", 27)
+	# Padding each row here rather than in the shell: the draw loop reads the
+	# frame as one blob and has no cheap way to indent it line by line.
+	if (PAD == "") PAD = 0
+	IND = ""
+	for (pi = 0; pi < PAD; pi++) IND = IND " "
 	RAMP = "..::--~~==++**##%%@@"
 	NRAMP = length(RAMP)
 	PERIOD = 32                   # frames per revolution
@@ -499,7 +525,7 @@ function render(   i, j, sx, sy, dx, dy, dz, len, ox, oy, oz, rx, ry, rz,
 			row = row ch
 		}
 		if (last != "" && COLOR != "none") row = row ESC "[0m"
-		print row
+		print IND row
 	}
 }
 
@@ -533,13 +559,37 @@ anim_ok() {
 
   lines=$(tput lines 2>/dev/null || echo 24)
   cols=$(tput cols 2>/dev/null || echo 80)
+
+  # The zipper is the widest thing drawn, and the pack sits centred over it, so
+  # the layout is measured from the zipper outwards.
+  BARW=$((cols - 2 * HUD_GUT))
+  [ "$BARW" -gt 62 ] && BARW=62
+
   ANIM_H=$((lines - HEAD_H - FOOT_H - 1))
-  [ "$ANIM_H" -gt 64 ] && ANIM_H=64
-  ANIM_W=$((ANIM_H * 36 / 10))
-  [ "$ANIM_W" -gt $((cols - 2)) ] && ANIM_W=$((cols - 2))
+  [ "$ANIM_H" -gt "$ANIM_MAX_H" ] && ANIM_H=$ANIM_MAX_H
+  case ${ZAINO_ANIM_H:-} in
+  '' | *[!0-9]*) ;;
+  *) [ "$ZAINO_ANIM_H" -gt 0 ] && [ "$ANIM_H" -gt "$ZAINO_ANIM_H" ] &&
+    ANIM_H=$ZAINO_ANIM_H ;;
+  esac
+  ANIM_W=$((ANIM_H * ANIM_RATIO / 10))
+
+  # The pack is drawn to fill its frame, so trimming the width alone does not
+  # crop it — it fattens it. A frame that will not fit has to cost height too,
+  # or a narrow terminal gets a pack swollen to the size of the window.
+  if [ "$ANIM_W" -gt "$BARW" ]; then
+    ANIM_W=$BARW
+    ANIM_H=$((ANIM_W * 10 / ANIM_RATIO))
+  fi
+
+  # Centred on the zipper rather than on the terminal: the two read as one
+  # object, and the HUD keeps the left margin the header set.
+  ANIM_PAD=$((HUD_GUT + (BARW - ANIM_W) / 2))
+  [ "$ANIM_PAD" -lt 0 ] && ANIM_PAD=0
+
   # 56 columns is what the widest HUD line needs; narrower, and it wraps and
   # takes the cursor arithmetic with it.
-  [ "$ANIM_H" -ge 12 ] && [ "$ANIM_W" -ge 30 ] && [ "$cols" -ge 56 ]
+  [ "$ANIM_H" -ge 10 ] && [ "$ANIM_W" -ge 22 ] && [ "$cols" -ge 56 ]
 }
 
 anim_color() {
@@ -563,6 +613,11 @@ spin_while() {
   # Not stdin: piped into sh, stdin is the script itself and is already at EOF.
   KEY_PID=
   if [ -r /dev/tty ]; then
+    # The terminal would echo the ⏎ that ends the wait, and that newline scrolls
+    # the screen out from under the cursor arithmetic: every frame after it is
+    # drawn a row low, and the zipper it left behind stays on screen.
+    TTY_SAVED=$(stty -g </dev/tty 2>/dev/null || true)
+    [ -n "$TTY_SAVED" ] && { stty -echo </dev/tty 2>/dev/null || TTY_SAVED=; }
     (
       read -r _ </dev/tty 2>/dev/null || true
       : >"$TMP/keyed"
@@ -574,7 +629,8 @@ spin_while() {
   printf '\033[?25l'
   begun=$(date +%s 2>/dev/null || echo 0)
   # The program is all BEGIN; /dev/null stops an awk from waiting on a terminal.
-  awk -v W="$ANIM_W" -v H="$ANIM_H" -v COLOR="$color" -v TMPD="$TMP" \
+  awk -v W="$ANIM_W" -v H="$ANIM_H" -v COLOR="$color" -v PAD="$ANIM_PAD" \
+    -v TMPD="$TMP" \
     "$prog" </dev/null 2>/dev/null |
     {
       first=yes
@@ -658,6 +714,10 @@ spin_while() {
     }
   printf '\033[?25h'
   CURSOR_HIDDEN=
+  if [ -n "$TTY_SAVED" ]; then
+    stty "$TTY_SAVED" </dev/tty 2>/dev/null || true
+    TTY_SAVED=
+  fi
 }
 
 # $1 is how far along the zipper should be, $2 what to call it.

@@ -19,7 +19,20 @@ const (
 
 	KindPermission Kind = "permission"
 	KindCompact    Kind = "compact"
+	KindTask       Kind = "task"
 )
+
+// TaskBody is a child agent's whole run, keyed by the task call's tool-use ID.
+type TaskBody struct {
+	ID          string        `json:"id"`
+	Description string        `json:"description,omitempty"`
+	Agent       string        `json:"agent,omitempty"`
+	Model       string        `json:"model,omitempty"`
+	Depth       int           `json:"depth,omitempty"`
+	Failed      bool          `json:"failed,omitempty"`
+	Messages    []llm.Message `json:"messages,omitempty"`
+	Usage       llm.Usage     `json:"usage"`
+}
 
 // Unexported so entries can only be built through the constructors below,
 // which is what keeps ID, Parent, Seq and At the store's business.
@@ -40,6 +53,8 @@ type body struct {
 	Tool     string `json:"tool,omitempty"`
 	Action   string `json:"action,omitempty"`
 	Decision string `json:"decision,omitempty"`
+
+	Task *TaskBody `json:"task,omitempty"`
 }
 
 type New struct {
@@ -86,6 +101,10 @@ func Clear() New {
 
 func Compacted(text string) New {
 	return New{Type: KindCompact, body: body{Text: text}}
+}
+
+func Task(t TaskBody) New {
+	return New{Type: KindTask, body: body{Task: &t}}
 }
 
 func Permission(tool, action, target, decision string) New {

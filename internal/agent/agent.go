@@ -19,6 +19,11 @@ type Hooks struct {
 	OnToolResult    func(call llm.ToolUseBlock, result string, isError bool)
 	OnTurn          func(resp *llm.Response)
 	OnCompact       func(summary string, kept []llm.Message)
+
+	// OnTask returns the hooks a spawned child runs with; nil keeps it silent.
+	OnTask func(info TaskInfo) Hooks
+
+	OnTaskDone func(id string, history []llm.Message, err error)
 }
 
 type Agent struct {
@@ -285,7 +290,7 @@ func (a *Agent) execute(ctx context.Context, call llm.ToolUseBlock, ready tool.C
 		}
 	}()
 
-	out, err := ready.Run(ctx)
+	out, err := ready.Run(tool.WithCallID(ctx, call.ID))
 	if err != nil {
 		return a.result(call, "Error: "+err.Error(), true)
 	}

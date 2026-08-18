@@ -8,8 +8,8 @@
     <p class="kick">Four pockets</p>
     <h2 class="big">Permission is a mode.</h2>
     <p class="sub">
-      What the model may do without asking is a mode. <kbd>⇧⇥</kbd> cycles it, or
-      set it with <code>-permission</code>.
+      <kbd>⇧⇥</kbd> cycles it mid-conversation; <code>-permission</code> sets it
+      at the door.
     </p>
 
     <div class="pocket-row" data-stagger use:reveal>
@@ -33,13 +33,6 @@
         <code>-allow-outside</code> is the only thing that moves it.
       </p>
     </div>
-
-    <p class="body-copy narrow">
-      When zaino asks, <kbd>y</kbd> allows once, <kbd>a</kbd> allows that tool
-      and target for the session, <kbd>n</kbd> refuses. A refusal isn't an error
-      — the model is told no and carries on. Every answer is written into the
-      session, so the transcript says exactly what it was let near.
-    </p>
   </div>
 </section>
 

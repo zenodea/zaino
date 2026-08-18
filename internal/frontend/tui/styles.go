@@ -83,6 +83,7 @@ var (
 	planChip   = lipgloss.NewStyle().Foreground(tooling).Bold(true)
 	bypassChip = lipgloss.NewStyle().Foreground(danger).Bold(true)
 
+	agentChip     = lipgloss.NewStyle().Foreground(tooling).Bold(true)
 	vimNormalChip = lipgloss.NewStyle().Foreground(accent).Bold(true)
 	vimVisualChip = lipgloss.NewStyle().Foreground(speech).Bold(true)
 	quitChip      = lipgloss.NewStyle().Foreground(danger).Bold(true)

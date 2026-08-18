@@ -10,6 +10,7 @@ import (
 	"io"
 	"os"
 	"strings"
+	"sync"
 
 	"github.com/zenodea/zaino/internal/agent"
 	"github.com/zenodea/zaino/internal/attach"
@@ -63,11 +64,7 @@ func Run(ag *agent.Agent, o Options) error {
 	usage := o.Restored.Usage
 	ag.Hooks.OnTurn = func(resp *llm.Response) {
 		u := resp.Usage
-		usage.InputTokens += u.InputTokens
-		usage.OutputTokens += u.OutputTokens
-		usage.ThinkingTokens += u.ThinkingTokens
-		usage.CacheReadTokens += u.CacheReadTokens
-		usage.CacheWriteTokens += u.CacheWriteTokens
+		addUsage(&usage, u)
 
 		o.Recorder.Turn(u)
 		o.Wire.Turn(resp.Model, resp.StopReason, u)
@@ -84,6 +81,73 @@ func Run(ag *agent.Agent, o Options) error {
 		o.Recorder.Compact(summary, kept)
 		fmt.Fprintf(os.Stderr, "\x1b[2m[compacted, %d messages kept]\x1b[0m\n", max(len(kept)-1, 0))
 	}
+
+	var taskMu sync.Mutex
+	taskInfo := map[string]agent.TaskInfo{}
+	taskUsage := map[string]*llm.Usage{}
+
+	ag.Hooks.OnTaskDone = func(id string, history []llm.Message, err error) {
+		taskMu.Lock()
+		defer taskMu.Unlock()
+		info := taskInfo[id]
+		var spent llm.Usage
+		if u := taskUsage[id]; u != nil {
+			spent = *u
+		}
+
+		state := "done"
+		if err != nil {
+			state = "failed"
+		}
+		fmt.Fprintf(os.Stderr, "\x1b[2m⚒ %s %s\x1b[0m\n", info.Description, state)
+
+		if recErr := o.Recorder.Append(session.Task(session.TaskBody{
+			ID:          id,
+			Description: info.Description,
+			Agent:       info.Agent,
+			Model:       info.Model,
+			Depth:       info.Depth,
+			Failed:      err != nil,
+			Messages:    history,
+			Usage:       spent,
+		})); recErr != nil {
+			fmt.Fprintln(os.Stderr, "\x1b[31msession not being saved: "+recErr.Error()+"\x1b[0m")
+		}
+	}
+
+	var onTask func(info agent.TaskInfo) agent.Hooks
+	onTask = func(info agent.TaskInfo) agent.Hooks {
+		taskMu.Lock()
+		taskInfo[info.ID] = info
+		taskUsage[info.ID] = &llm.Usage{}
+		taskMu.Unlock()
+		fmt.Fprintf(os.Stderr, "\n\x1b[2m⚒ %s started\x1b[0m\n", info.Description)
+
+		label := info.Description
+		return agent.Hooks{
+			OnToolCall: func(call llm.ToolUseBlock) {
+				fmt.Fprintf(os.Stderr, "\x1b[2m· [%s] %s %s\x1b[0m\n", label, call.Name, compactJSON(call.Input))
+			},
+			OnToolResult: func(call llm.ToolUseBlock, result string, isError bool) {
+				status := "ok"
+				if isError {
+					status = "error"
+				}
+				fmt.Fprintf(os.Stderr, "\x1b[2m· [%s] %s → %s (%d bytes)\x1b[0m\n", label, call.Name, status, len(result))
+			},
+			OnTurn: func(resp *llm.Response) {
+				taskMu.Lock()
+				defer taskMu.Unlock()
+				if u := taskUsage[info.ID]; u != nil {
+					addUsage(u, resp.Usage)
+				}
+				addUsage(&usage, resp.Usage)
+			},
+			OnTask:     onTask,
+			OnTaskDone: ag.Hooks.OnTaskDone,
+		}
+	}
+	ag.Hooks.OnTask = onTask
 
 	interrupts := newInterrupts()
 	defer interrupts.stop()
@@ -213,6 +277,14 @@ func workdir() string {
 		return "."
 	}
 	return dir
+}
+
+func addUsage(total *llm.Usage, u llm.Usage) {
+	total.InputTokens += u.InputTokens
+	total.OutputTokens += u.OutputTokens
+	total.ThinkingTokens += u.ThinkingTokens
+	total.CacheReadTokens += u.CacheReadTokens
+	total.CacheWriteTokens += u.CacheWriteTokens
 }
 
 func compactJSON(raw json.RawMessage) string {

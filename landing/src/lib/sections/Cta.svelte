@@ -26,11 +26,6 @@
     font-size: 54px; margin: 0 0 6px; transform: rotate(-6deg);
     display: inline-block; cursor: default;
   }
-  .cta-mark:hover { animation: shoulder .6s ease-in-out; }
-  @keyframes shoulder {
-    35% { translate: 0 -10px; rotate: 8deg; }
-    70% { translate: 0 0; rotate: -3deg; }
-  }
   .cta h2 {
     font-size: clamp(44px, 7vw, 76px); line-height: 1;
     font-variation-settings: "SOFT" 40, "WONK" 1;

@@ -156,6 +156,46 @@ func TestRewindHandsBackAShorterConversation(t *testing.T) {
 	}
 }
 
+func TestJourneyBranchesFromAnAbandonedTurn(t *testing.T) {
+	store := &memStore{}
+	o := Options{Recorder: session.NewRecorder(store)}
+
+	messages := []llm.Message{
+		llm.UserText("first thing"),
+		{Role: llm.RoleAssistant, Content: llm.Content{llm.TextBlock{Text: "an answer"}}},
+		llm.UserText("second thing"),
+	}
+	if err := o.Recorder.Messages(messages); err != nil {
+		t.Fatal(err)
+	}
+	if err := o.Recorder.Rewind(2); err != nil {
+		t.Fatal(err)
+	}
+	branched := append(messages[:2:2], llm.UserText("instead"))
+	if err := o.Recorder.Messages(branched); err != nil {
+		t.Fatal(err)
+	}
+
+	// Listing is not a change; the flattened turns are first, the abandoned
+	// second, then the branch that replaced it.
+	var usage llm.Usage
+	if got := runCommand(newAgent(), "/journey", branched, &usage, o); got.changed {
+		t.Error("listing the tree changed the context")
+	}
+
+	done := runCommand(newAgent(), "/journey 2", branched, &usage, o)
+	if !done.changed {
+		t.Fatal("the context was left as it was")
+	}
+	if len(done.context) != 2 || done.context[1].Text() != "an answer" {
+		t.Errorf("context = %d messages, want everything before the abandoned turn", len(done.context))
+	}
+
+	if got := runCommand(newAgent(), "/journey 9", branched, &usage, o); got.changed {
+		t.Error("a number past the end changed the context")
+	}
+}
+
 // Enough of a store to record into; the file is not what is under test.
 type memStore struct {
 	entries []session.Entry

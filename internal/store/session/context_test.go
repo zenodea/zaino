@@ -169,3 +169,39 @@ func TestNoLimitReadsBackAsUnset(t *testing.T) {
 		t.Errorf("limit = %v, want nil when none was ever set", *c.Limit)
 	}
 }
+
+func TestTasksAreRebuiltAndClearedWithTheirTurns(t *testing.T) {
+	early := session.TaskBody{ID: "toolu_old", Description: "before the clear"}
+	late := session.TaskBody{
+		ID:          "toolu_new",
+		Description: "find the callers",
+		Agent:       "scout",
+		Model:       "small",
+		Messages: []llm.Message{
+			llm.UserText("find them"),
+			{Role: llm.RoleAssistant, Content: llm.Content{llm.TextBlock{Text: "two callers"}}},
+		},
+		Usage: llm.Usage{InputTokens: 40, OutputTokens: 9},
+	}
+
+	c := build(t,
+		session.Task(early),
+		session.Clear(),
+		session.Message(llm.UserText("go"), &llm.Usage{InputTokens: 5, OutputTokens: 1}),
+		session.Task(late),
+	)
+
+	if len(c.Tasks) != 1 {
+		t.Fatalf("got %d tasks, want only the one after the clear: %+v", len(c.Tasks), c.Tasks)
+	}
+	got := c.Tasks[0]
+	if got.ID != "toolu_new" || got.Agent != "scout" || len(got.Messages) != 2 {
+		t.Errorf("task = %+v, want it back whole", got)
+	}
+	if got.Messages[1].Text() != "two callers" {
+		t.Errorf("child answer = %q", got.Messages[1].Text())
+	}
+	if c.Usage.InputTokens != 45 || c.Usage.OutputTokens != 10 {
+		t.Errorf("usage = %+v, want the child's spend counted in", c.Usage)
+	}
+}

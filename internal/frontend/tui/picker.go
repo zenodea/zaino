@@ -122,6 +122,17 @@ func (m *Model) resume(id string) {
 
 	ctx := session.Build(entries)
 
+	m.rec.Close()
+	m.rec.Use(store, len(ctx.Messages))
+	m.saveFailed = false
+
+	m.applyContext(ctx)
+}
+
+// applyContext hands a rebuilt conversation to the agent and the screen the
+// same way wherever it came from: another session file, or an earlier turn
+// of this one.
+func (m *Model) applyContext(ctx session.Context) {
 	switched := m.provider
 	if ctx.Provider != "" && ctx.Provider != m.provider {
 		backend, err := provider.New(ctx.Provider)
@@ -149,10 +160,6 @@ func (m *Model) resume(id string) {
 		m.agent.Thinking.Show = *ctx.Thinking
 	}
 	m.lastModel = ""
-
-	m.rec.Close()
-	m.rec.Use(store, len(ctx.Messages))
-	m.saveFailed = false
 
 	m.Restore(ctx)
 	if stripped > 0 {

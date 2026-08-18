@@ -206,3 +206,128 @@ func rewind(ag *agent.Agent, messages []llm.Message, arg string, o Options,
 	notice("rewound · %d messages left the context\n› %s", len(messages)-t.At, t.Prompt)
 	return messages[:t.At], true
 }
+
+// One turn of the tree laid flat for a numbered list.
+type journeyTurn struct {
+	id, parent, prompt, prefix string
+	onPath, here               bool
+}
+
+// The tree drawn in characters and numbered, so a line-based UI can point at
+// any turn — the abandoned branches included — and take it up again.
+func journey(ag *agent.Agent, arg string, usage *llm.Usage, o Options,
+	notice, fail func(string, ...any)) ([]llm.Message, bool) {
+	store := o.Recorder.Store()
+	if store == nil {
+		notice("no session on disk — /rewind still walks the live conversation")
+		return nil, false
+	}
+	entries, err := store.Entries()
+	if err != nil {
+		fail("%s", err)
+		return nil, false
+	}
+	leaf, err := store.Leaf()
+	if err != nil {
+		fail("%s", err)
+		return nil, false
+	}
+
+	turns := journeyTurns(entries, leaf)
+	if len(turns) == 0 {
+		notice("nothing to look back on — you have not asked anything yet")
+		return nil, false
+	}
+
+	if arg == "" {
+		lines := make([]string, 0, len(turns)+1)
+		lines = append(lines, "journey · branch from one with /journey <n>")
+		for i, t := range turns {
+			node, mark := "●", ""
+			if !t.onPath {
+				node = "○"
+			}
+			if t.here {
+				mark = "   ← here"
+			}
+			lines = append(lines, fmt.Sprintf("%3d  %s%s %s%s",
+				i+1, t.prefix, node, truncate(firstLine(t.prompt), 48), mark))
+		}
+		notice("%s", strings.Join(lines, "\n"))
+		return nil, false
+	}
+
+	n, err := strconv.Atoi(arg)
+	if err != nil || n < 1 || n > len(turns) {
+		fail("/journey takes a number from 1 to %d", len(turns))
+		return nil, false
+	}
+
+	t := turns[n-1]
+	ctx := session.BuildAt(entries, t.parent)
+	if err := o.Recorder.Jump(t.parent, len(ctx.Messages)); err != nil {
+		fail("%s", err)
+		return nil, false
+	}
+
+	ag.Model = ctx.Model
+	ag.System = ctx.System
+	ag.Effort = ctx.Effort
+	messages := ctx.Messages
+	if ctx.Provider != "" && ctx.Provider != ag.Provider.Name() {
+		var stripped int
+		messages, stripped = session.StripProviderBlocks(messages)
+		if stripped > 0 {
+			notice("dropped %d reasoning blocks that only %s can read back", stripped, ctx.Provider)
+		}
+	}
+	*usage = ctx.Usage
+
+	notice("branched · %d messages lead here\n› %s", len(messages), t.prompt)
+	return messages, true
+}
+
+// The tree laid flat, top to bottom in the order things were said. A turn
+// with one follow-up continues straight down; only a fork opens a new column.
+func journeyTurns(entries []session.Entry, leaf string) []journeyTurn {
+	var turns []journeyTurn
+	var walk func(n *session.Node, connector, continuation string)
+	walk = func(n *session.Node, connector, continuation string) {
+		turns = append(turns, journeyTurn{
+			id:     n.Entry.ID,
+			parent: n.Entry.Parent,
+			prompt: n.Entry.Prompt(),
+			prefix: connector,
+		})
+		if len(n.Children) == 1 {
+			walk(n.Children[0], continuation, continuation)
+			return
+		}
+		for i, child := range n.Children {
+			if i < len(n.Children)-1 {
+				walk(child, continuation+"├─", continuation+"│ ")
+				continue
+			}
+			walk(child, continuation+"└─", continuation+"  ")
+		}
+	}
+	for _, root := range session.Tree(entries) {
+		walk(root, "", "")
+	}
+
+	onPath := map[string]bool{}
+	for _, e := range session.PathTo(entries, leaf) {
+		onPath[e.ID] = true
+	}
+	here := ""
+	for i := range turns {
+		turns[i].onPath = onPath[turns[i].id]
+		if turns[i].onPath {
+			here = turns[i].id
+		}
+	}
+	for i := range turns {
+		turns[i].here = turns[i].id == here
+	}
+	return turns
+}

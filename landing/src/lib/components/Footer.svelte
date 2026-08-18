@@ -5,7 +5,7 @@
 
 <footer class="foot">
   <div class="wrap foot-in">
-    <span>🎒 <b><Wordmark /></b> — an agent harness in Go</span>
+    <span>🎒 <b><Wordmark /></b> · an agent harness in Go</span>
     <span class="foot-links">
       <a href={repo}>GitHub</a>
       <a href="{repo}/issues">Issues</a>

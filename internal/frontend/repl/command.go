@@ -44,6 +44,7 @@ const help = `/help                list the commands
 /tools               list the tools the model has
 /compact             fold the conversation so far into a summary
 /rewind [n]          take the conversation up again from an earlier turn
+/journey [n]         the tree of turns; branch from any of them  (/tree)
 /limit [tokens|off]  stop the session when the context passes a ceiling
 /usage               token usage for this session
 /sessions            list saved sessions      (/resume)
@@ -275,6 +276,13 @@ func runCommand(ag *agent.Agent, line string, messages []llm.Message,
 			break
 		}
 		return outcome{context: trimmed, changed: true}
+
+	case "journey", "tree":
+		rebuilt, ok := journey(ag, arg, usage, o, notice, fail)
+		if !ok {
+			break
+		}
+		return outcome{context: rebuilt, changed: true}
 
 	case "config":
 		notice("%s", describeConfig(ag, o))

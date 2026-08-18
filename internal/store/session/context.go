@@ -13,6 +13,7 @@ const SummaryPrefix = "Summary of the conversation so far:\n\n"
 type Context struct {
 	Messages []llm.Message
 	Summary  string
+	Tasks    []TaskBody
 
 	// The entry each message came from, one for one with Messages. A summary
 	// rebuilt from a compaction has no entry, and the empty mark it leaves is
@@ -37,15 +38,26 @@ func Path(entries []Entry) []Entry {
 	if len(entries) == 0 {
 		return nil
 	}
+	return PathTo(entries, entries[len(entries)-1].ID)
+}
 
+// PathTo is the line from any entry back to the root, so a branch that was
+// left behind can be read the same way as the one that was taken. The empty
+// leaf is the root, and the path to it is no path at all.
+func PathTo(entries []Entry, leaf string) []Entry {
 	byID := make(map[string]Entry, len(entries))
 	for _, e := range entries {
 		byID[e.ID] = e
 	}
 
+	at, ok := byID[leaf]
+	if !ok {
+		return nil
+	}
+
 	seen := map[string]bool{}
 	var out []Entry
-	for at := entries[len(entries)-1]; !seen[at.ID]; {
+	for !seen[at.ID] {
 		seen[at.ID] = true
 		out = append(out, at)
 		parent, ok := byID[at.Parent]
@@ -62,8 +74,17 @@ func Path(entries []Entry) []Entry {
 // Settings come from every entry — a clear should not lose your model —
 // while messages come from the last clear onwards.
 func Build(entries []Entry) Context {
+	return build(Path(entries))
+}
+
+// BuildAt rebuilds the conversation as it stood at any entry in the tree,
+// however many branches have grown past it since.
+func BuildAt(entries []Entry, leaf string) Context {
+	return build(PathTo(entries, leaf))
+}
+
+func build(entries []Entry) Context {
 	var c Context
-	entries = Path(entries)
 
 	// A summary is a boundary like a clear, except that what came before it
 	// is not forgotten so much as folded into one message.
@@ -98,20 +119,29 @@ func Build(entries []Entry) Context {
 	}
 
 	for _, e := range entries[start:] {
+		if e.Type == KindTask && e.Task != nil {
+			c.Tasks = append(c.Tasks, *e.Task)
+			addUsage(&c.Usage, e.Task.Usage)
+			continue
+		}
 		if e.Type != KindMessage || e.Message == nil {
 			continue
 		}
 		c.Messages = append(c.Messages, *e.Message)
 		c.Marks = append(c.Marks, e.ID)
 		if e.Usage != nil {
-			c.Usage.InputTokens += e.Usage.InputTokens
-			c.Usage.OutputTokens += e.Usage.OutputTokens
-			c.Usage.ThinkingTokens += e.Usage.ThinkingTokens
-			c.Usage.CacheReadTokens += e.Usage.CacheReadTokens
-			c.Usage.CacheWriteTokens += e.Usage.CacheWriteTokens
+			addUsage(&c.Usage, *e.Usage)
 		}
 	}
 	return c
+}
+
+func addUsage(total *llm.Usage, u llm.Usage) {
+	total.InputTokens += u.InputTokens
+	total.OutputTokens += u.OutputTokens
+	total.ThinkingTokens += u.ThinkingTokens
+	total.CacheReadTokens += u.CacheReadTokens
+	total.CacheWriteTokens += u.CacheWriteTokens
 }
 
 func StripProviderBlocks(messages []llm.Message) ([]llm.Message, int) {

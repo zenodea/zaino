@@ -21,9 +21,13 @@ func Turns(messages []llm.Message) []Turn {
 		if msg.Role != llm.RoleUser || hasToolResult(msg) {
 			continue
 		}
-		if text := strings.TrimSpace(msg.Text()); text != "" {
-			out = append(out, Turn{At: i, Prompt: text})
+		// The summary a compaction leaves is said in your voice, but it is not
+		// a turn: it is the boundary a rewind cannot cross.
+		text := strings.TrimSpace(msg.Text())
+		if text == "" || strings.HasPrefix(text, SummaryPrefix) {
+			continue
 		}
+		out = append(out, Turn{At: i, Prompt: text})
 	}
 	return out
 }
