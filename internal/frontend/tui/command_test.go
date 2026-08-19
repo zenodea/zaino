@@ -539,3 +539,97 @@ func TestTheMenuBarMovesThroughUpdate(t *testing.T) {
 		t.Error("no cursor bar in the rendered menu")
 	}
 }
+
+func TestLiveCommandRunsMidTurn(t *testing.T) {
+	m := newTestModel(t, 80, 24)
+	m.streaming = true
+	m.input.SetValue("/usage")
+
+	m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+
+	if m.input.Value() != "" {
+		t.Errorf("the command was not taken: %q", m.input.Value())
+	}
+	if !m.sheet.open || !strings.HasPrefix(m.sheet.title, "usage") {
+		t.Errorf("expected the usage sheet, got %+v", m.sheet)
+	}
+}
+
+func TestOtherCommandsWaitForTheTurn(t *testing.T) {
+	m := newTestModel(t, 80, 24)
+	m.streaming = true
+	m.input.SetValue("/clear")
+
+	m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+
+	if m.input.Value() != "/clear" {
+		t.Errorf("input should be left intact, got %q", m.input.Value())
+	}
+	if len(m.entries) != 1 || m.entries[0].kind != entryNotice {
+		t.Fatalf("expected one notice, got %+v", m.entries)
+	}
+	if !strings.Contains(m.entries[0].text, "/clear waits") {
+		t.Errorf("notice does not say what is waiting: %q", m.entries[0].text)
+	}
+}
+
+func TestMenuOffersOnlyLiveCommandsMidTurn(t *testing.T) {
+	m := newTestModel(t, 80, 24)
+	m.streaming = true
+
+	typeLine(m, "/us")
+	if !m.menu.open {
+		t.Fatal("the menu should open for a live command mid-turn")
+	}
+	for _, c := range m.menu.matches {
+		if !c.live {
+			t.Errorf("/%s is not live but was offered mid-turn", c.name)
+		}
+	}
+}
+
+func TestTheMenuComesDownOntoTheRule(t *testing.T) {
+	m := newTestModel(t, 80, 24)
+	for i := range 40 {
+		m.push(entry{kind: entryAssistant, text: fmt.Sprintf("answer %d", i)})
+	}
+	typeLine(m, "/")
+
+	lines := strings.Split(stripANSI(m.View()), "\n")
+	ruleAt := -1
+	for i, line := range lines {
+		if strings.Contains(line, "───") {
+			ruleAt = i
+		}
+	}
+	if ruleAt < 1 {
+		t.Fatal("no rule on screen")
+	}
+	box := ruleAt - 1
+	for box > 0 && strings.TrimSpace(lines[box]) == "" {
+		box--
+	}
+	if ruleAt-box != 1 {
+		t.Errorf("the menu box ends %d lines above the rule, want it sitting on the rule", ruleAt-box)
+	}
+}
+
+func TestMenuWalksOnCtrlJAndCtrlK(t *testing.T) {
+	m := newTestModel(t, 80, 24)
+	typeLine(m, "/")
+	if !m.menu.open || len(m.menu.matches) < 2 {
+		t.Fatal("the menu did not open with enough to walk")
+	}
+
+	m.Update(tea.KeyMsg{Type: tea.KeyCtrlJ})
+	if m.menu.cursor != 1 {
+		t.Errorf("cursor = %d after ⌃j, want 1", m.menu.cursor)
+	}
+	if m.cursor >= 0 {
+		t.Error("⌃j moved the transcript bar instead of the menu")
+	}
+	m.Update(tea.KeyMsg{Type: tea.KeyCtrlK})
+	if m.menu.cursor != 0 {
+		t.Errorf("cursor = %d after ⌃k, want 0", m.menu.cursor)
+	}
+}

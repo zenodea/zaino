@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/zenodea/zaino/internal/llm"
+	"github.com/zenodea/zaino/internal/store/session"
 )
 
 // A conversation of two exchanges, rewound to the second turn and asked
@@ -185,5 +186,53 @@ func TestJourneyShowsTheContextAtEachStop(t *testing.T) {
 	}
 	if view := m.journeyView(); !strings.Contains(view, "200.0k") {
 		t.Errorf("view does not carry the context size:\n%s", view)
+	}
+}
+
+// A model change made after a turn, on one of two roads out of it, is drawn
+// past that road's bend and not on the trunk both roads share — and a row
+// down from the corner, so it never sits on the bend itself.
+func TestALandmarkPastAForkStaysOnItsRoad(t *testing.T) {
+	user := func(id, parent, text string) session.Entry {
+		e := session.Entry{ID: id, Parent: parent, Type: session.KindMessage}
+		msg := llm.UserText(text)
+		e.Message = &msg
+		return e
+	}
+	reply := func(id, parent, text string) session.Entry {
+		e := session.Entry{ID: id, Parent: parent, Type: session.KindMessage}
+		msg := llm.Message{Role: llm.RoleAssistant, Content: llm.Content{llm.TextBlock{Text: text}}}
+		e.Message = &msg
+		return e
+	}
+	model := session.Entry{ID: "m", Parent: "p2", Type: session.KindModel}
+	model.Model = "@preset/cheap"
+
+	entries := []session.Entry{
+		user("p1", "", "do it"), reply("p2", "p1", "done"),
+		model,
+		user("s1", "m", "spawn"), reply("s2", "s1", "spawned"),
+		user("d1", "p2", "do it again"), reply("d2", "d1", "again"),
+	}
+	lines, _, _ := draw(entries, session.PathTo(entries, "s2"))
+
+	var drawn []string
+	for _, l := range lines {
+		drawn = append(drawn, l.road+l.text)
+	}
+	got := strings.Join(drawn, "\n")
+	want := strings.Join([]string{
+		"",
+		"┃",
+		"┗━┓",
+		"┆ ┃",
+		"┆ ⇄ model → @preset/cheap",
+		"┆ ┃",
+		"┆ ",
+		"┆",
+		"╰╌",
+	}, "\n")
+	if got != want {
+		t.Errorf("map drawn as\n%s\nwant\n%s", got, want)
 	}
 }

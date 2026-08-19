@@ -2,6 +2,7 @@ package tui
 
 import (
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -211,5 +212,55 @@ func TestEnterIgnoredWhileStreaming(t *testing.T) {
 	}
 	if len(m.entries) != 0 {
 		t.Errorf("no entry should be pushed, got %+v", m.entries)
+	}
+}
+
+func TestTranscriptNeverTouchesTheRule(t *testing.T) {
+	m := newTestModel(t, 80, 24)
+	for i := range 40 {
+		m.push(entry{kind: entryAssistant, text: fmt.Sprintf("answer %d", i)})
+	}
+
+	lines := strings.Split(stripANSI(m.View()), "\n")
+	if got := len(lines); got != 24 {
+		t.Fatalf("view is %d lines, want 24", got)
+	}
+	ruleAt := -1
+	for i, line := range lines {
+		if strings.Contains(line, "───") {
+			ruleAt = i
+		}
+	}
+	if ruleAt < 1 {
+		t.Fatal("no rule on screen")
+	}
+	if strings.TrimSpace(lines[ruleAt-1]) != "" {
+		t.Errorf("the line above the rule is not blank: %q", lines[ruleAt-1])
+	}
+}
+
+func TestToolCallsOpenUnderTheBarMidTurn(t *testing.T) {
+	m := newTestModel(t, 80, 24)
+	m.streaming = true
+	m.push(entry{kind: entryUser, text: "read it"})
+	m.push(entry{kind: entryTool, toolName: "read", toolID: "t1", toolInput: `{"path":"main.go"}`})
+
+	m.Update(tea.KeyMsg{Type: tea.KeyCtrlK})
+	if m.cursor != 1 {
+		t.Fatalf("cursor = %d after ⌃k, want the tool call", m.cursor)
+	}
+
+	m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if !m.entries[1].expanded {
+		t.Error("⏎ on a tool call should open it, even while the turn runs")
+	}
+	m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if m.entries[1].expanded {
+		t.Error("a second ⏎ should close it again")
+	}
+
+	m.Update(tea.KeyMsg{Type: tea.KeyCtrlJ})
+	if m.cursor >= 0 {
+		t.Errorf("walking off the end should clear the bar, cursor = %d", m.cursor)
 	}
 }

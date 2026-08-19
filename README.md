@@ -48,11 +48,17 @@ a newline, `↑`/`↓` walk back through prompts you have sent before, and `⇧�
 cycles the permission mode. What the model writes renders as markdown; what
 you write stays exactly as you typed it.
 
-`⌃j`/`⌃k` move a bar up and down the transcript, one thing at a time. Park
+`⌃j`/`⌃k` move a bar up and down the transcript, one thing at a time —
+`⌃↑`/`⌃↓` do the same where a multiplexer has claimed those, and once the
+bar is up, plain `j`/`k` walk it until you type something else. Park
 it on a tool call and `⏎` opens the call up — arguments, results, the whole
 error if there was one. The bar walks the lines between entries rather than
 jumping, leaving a tail that thins and dims behind it. `-animate=false`
 turns the theatrics off.
+
+While a turn runs the composer still takes the commands that only look —
+`/usage`, `/agents`, `/tools`, `/help`, `/config`, `/permission`, `/vim` — and
+the `/` menu narrows to them. Anything else waits for the turn to finish.
 
 `esc` and `⌃c` stop a running turn. With nothing running, `⌃c` arms the
 quit and says so in the footer; a second press leaves, any other key stands

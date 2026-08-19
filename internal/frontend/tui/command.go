@@ -27,6 +27,10 @@ type command struct {
 	arg     string
 	summary string
 	run     func(m *Model, arg string) tea.Cmd
+
+	// Safe while a turn is running: it reads, or changes only what the loop
+	// already reads under a lock.
+	live bool
 }
 
 // A function, not a variable: /help reads the registry back, and a variable
@@ -37,6 +41,7 @@ func commandList() []command {
 			name:    "help",
 			summary: "list the commands",
 			run:     cmdHelp,
+			live:    true,
 		},
 		{
 			name:    "clear",
@@ -84,6 +89,7 @@ func commandList() []command {
 			name:    "config",
 			summary: "what the config files came to, and where they are",
 			run:     cmdConfig,
+			live:    true,
 		},
 		{
 			name:    "permission",
@@ -91,17 +97,20 @@ func commandList() []command {
 			arg:     "[mode]",
 			summary: "show or set when tools stop to ask",
 			run:     cmdPermission,
+			live:    true,
 		},
 		{
 			name:    "tools",
 			summary: "list the tools the model has",
 			run:     cmdTools,
+			live:    true,
 		},
 		{
 			name:    "vim",
 			arg:     "[on|off]",
 			summary: "modal editing in the composer",
 			run:     cmdVim,
+			live:    true,
 		},
 		{
 			name:    "rewind",
@@ -121,6 +130,7 @@ func commandList() []command {
 			aliases: []string{"tasks"},
 			summary: "the child agents spawned this session, and a way into each",
 			run:     cmdAgents,
+			live:    true,
 		},
 		{
 			name:    "compact",
@@ -137,6 +147,7 @@ func commandList() []command {
 			name:    "usage",
 			summary: "token usage for this session",
 			run:     cmdUsage,
+			live:    true,
 		},
 		{
 			name:    "sessions",

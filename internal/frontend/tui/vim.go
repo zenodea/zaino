@@ -237,6 +237,9 @@ func (m *Model) handleNormalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "l":
 		m.setBuffer(text, forward(text, pos, count))
 	case "j", "k":
+		if m.cursor >= 0 && strings.TrimSpace(string(text)) == "" {
+			return m.handleAppKey(msg)
+		}
 		return m, m.verticalMove(key, count, text, pos)
 	case "w":
 		m.setBuffer(text, wordForward(text, pos, count))

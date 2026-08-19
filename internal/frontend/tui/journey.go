@@ -154,17 +154,39 @@ type roads struct {
 	branches int
 }
 
-// walk draws one stop and everything down the road from it. stopRow is the
-// ground the stop sits on — its lane, or its lane plus the curve out of its
-// parent's — while aboveLane and aboveVert pave the road rows leading in.
-func (b *roads) walk(n *session.Node, lane, stopRow, aboveLane, aboveVert string,
+// walk draws one stop and everything down the road from it. lane is the
+// ground this stop and its children stand on; above and vert pave the road
+// row leading in; bend is the curve out of the parent's lane at a fork, and
+// empty on a straight road.
+func (b *roads) walk(n *session.Node, lane, bend, above, vert string,
 	root bool) (beyond int, latest time.Time) {
+	stopRow := lane
+	if bend != "" {
+		stopRow = above + bend
+	}
+
 	if !root {
-		b.lines = append(b.lines, journeyLine{kind: lineRoad, road: aboveLane + aboveVert, stop: -1})
-		for _, mark := range b.landmarks(n.Entry) {
+		b.lines = append(b.lines, journeyLine{kind: lineRoad, road: above + vert, stop: -1})
+		marks := b.landmarks(n.Entry)
+
+		// On a straight road a landmark sits where it happened. Past a fork it
+		// has to be drawn beyond the bend: on the trunk it would read as having
+		// happened before the roads parted, when only this one passed it. So
+		// the road turns down a corner and runs a row before the first mark.
+		if bend != "" && len(marks) > 0 {
+			own, corner := "┆", "╮"
+			if b.onPath[n.Entry.ID] {
+				own, corner = "┃", "┓"
+			}
 			b.lines = append(b.lines,
-				journeyLine{kind: lineLandmark, road: aboveLane, text: mark, stop: -1},
-				journeyLine{kind: lineRoad, road: aboveLane + aboveVert, stop: -1})
+				journeyLine{kind: lineRoad, road: above + bend + corner, stop: -1},
+				journeyLine{kind: lineRoad, road: lane + own, stop: -1})
+			above, vert, stopRow = lane, own, lane
+		}
+		for _, mark := range marks {
+			b.lines = append(b.lines,
+				journeyLine{kind: lineLandmark, road: above, text: mark, stop: -1},
+				journeyLine{kind: lineRoad, road: above + vert, stop: -1})
 		}
 	}
 
@@ -194,7 +216,7 @@ func (b *roads) walk(n *session.Node, lane, stopRow, aboveLane, aboveVert string
 		if b.onPath[c.Entry.ID] {
 			vert = "┃"
 		}
-		took(b.walk(c, lane, lane, lane, vert, false))
+		took(b.walk(c, lane, "", lane, vert, false))
 	} else if len(n.Children) > 1 {
 		active := -1
 		for i, c := range n.Children {
@@ -227,7 +249,7 @@ func (b *roads) walk(n *session.Node, lane, stopRow, aboveLane, aboveVert string
 					childLane = lane + "┃ "
 				}
 			}
-			took(b.walk(c, childLane, lane+curve, lane, aboveV, false))
+			took(b.walk(c, childLane, curve, lane, aboveV, false))
 		}
 	}
 
@@ -487,7 +509,7 @@ func paveRoad(road string) string {
 	var b strings.Builder
 	for _, r := range road {
 		switch r {
-		case '┃', '━', '┗':
+		case '┃', '━', '┗', '┓':
 			b.WriteString(packStyle.Render(string(r)))
 		case ' ':
 			b.WriteRune(r)

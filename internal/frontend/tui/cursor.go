@@ -25,7 +25,11 @@ func (m *Model) moveCursor(delta int) tea.Cmd {
 		}
 		m.cursor = next
 		m.rerender()
-		return m.showCursor()
+		// The bar is placed by showCursor, after the repaint that rerender
+		// does: paint again so it is on screen this frame, not the next.
+		cmd := m.showCursor()
+		m.paint()
+		return cmd
 	}
 
 	if delta > 0 && m.cursor >= 0 {

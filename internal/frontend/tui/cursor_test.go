@@ -330,3 +330,104 @@ func TestTravelTakesTheSameTimeHoweverFar(t *testing.T) {
 		t.Errorf("a long move took %d frames against %d for a short one", far, near)
 	}
 }
+
+func TestPlainJKWalkTheBarOnceItIsUp(t *testing.T) {
+	m := newTestModel(t, 80, 24)
+	for i := range 5 {
+		m.push(entry{kind: entryAssistant, text: fmt.Sprintf("answer %d", i)})
+	}
+
+	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'k'}})
+	if m.cursor >= 0 || m.input.Value() != "k" {
+		t.Fatalf("with no bar, k should type: cursor=%d input=%q", m.cursor, m.input.Value())
+	}
+	m.input.Reset()
+
+	m.Update(tea.KeyMsg{Type: tea.KeyCtrlUp})
+	if m.cursor != 4 {
+		t.Fatalf("⌃↑ should raise the bar on the last entry, cursor=%d", m.cursor)
+	}
+	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'k'}})
+	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'k'}})
+	if m.cursor != 2 || m.input.Value() != "" {
+		t.Errorf("k k should walk up twice and type nothing: cursor=%d input=%q", m.cursor, m.input.Value())
+	}
+	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'j'}})
+	if m.cursor != 3 {
+		t.Errorf("j should walk down: cursor=%d", m.cursor)
+	}
+	m.Update(tea.KeyMsg{Type: tea.KeyCtrlDown})
+	if m.cursor != 4 {
+		t.Errorf("⌃↓ should walk down: cursor=%d", m.cursor)
+	}
+
+	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'h'}})
+	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'j'}})
+	if m.cursor >= 0 || m.input.Value() != "hj" {
+		t.Errorf("typing should take the composer back, j included: cursor=%d input=%q", m.cursor, m.input.Value())
+	}
+}
+
+func TestTheBarIsOnScreenTheMomentItMoves(t *testing.T) {
+	for _, animated := range []bool{false, true} {
+		m := newTestModel(t, 80, 24)
+		m.UseAnimation(animated)
+		for i := range 5 {
+			m.push(entry{kind: entryAssistant, text: fmt.Sprintf("answer %d", i)})
+		}
+		m.Update(tea.KeyMsg{Type: tea.KeyCtrlK})
+		if !strings.Contains(m.View(), "▌") {
+			t.Errorf("animate=%v: no bar on screen right after ⌃k", animated)
+		}
+	}
+}
+
+// Entries taller than a line used to put the bar in two places: positions
+// were counted in entries, heights in lines, and the bar matched both.
+func TestOneBarOnTallEntries(t *testing.T) {
+	m := newTestModel(t, 90, 30)
+	m.UseAnimation(true)
+	m.push(entry{kind: entryUser, text: "spawn subagent"})
+	m.push(entry{kind: entryAssistant, text: "Found:\n\n- Metacritic: 97\n- Eurogamer: 10/10\n\nOverall: landmark."})
+	m.push(entry{kind: entryUser, text: "sick"})
+	m.push(entry{kind: entryAssistant, text: "Glad you like it.\n\nAnything else?"})
+
+	barRows := func() []int {
+		var rows []int
+		for i, line := range strings.Split(stripANSI(m.View()), "\n") {
+			if strings.Contains(line, "▌") {
+				rows = append(rows, i)
+			}
+		}
+		return rows
+	}
+	rowOf := func(text string) int {
+		for i, line := range strings.Split(stripANSI(m.View()), "\n") {
+			if strings.Contains(line, text) {
+				return i
+			}
+		}
+		return -1
+	}
+	settle := func() {
+		for range 60 {
+			m.Update(frameMsg{})
+		}
+	}
+
+	m.Update(tea.KeyMsg{Type: tea.KeyCtrlK})
+	settle()
+	if rows := barRows(); len(rows) != 1 || rows[0] != rowOf("Glad you like it.") {
+		t.Errorf("after ⌃k the bar is at rows %v, want only the last entry's first line (row %d)", rows, rowOf("Glad you like it."))
+	}
+
+	m.Update(tea.KeyMsg{Type: tea.KeyCtrlK})
+	m.Update(tea.KeyMsg{Type: tea.KeyCtrlK})
+	settle()
+	if rows := barRows(); len(rows) != 1 || rows[0] != rowOf("Found:") {
+		t.Errorf("two up, the bar is at rows %v, want only the tall entry's first line (row %d)", rows, rowOf("Found:"))
+	}
+	if m.tops[1] != 2 || m.heights[1] != 6 || m.tops[2] != 9 {
+		t.Errorf("tops/heights count something other than lines: tops=%v heights=%v", m.tops, m.heights)
+	}
+}

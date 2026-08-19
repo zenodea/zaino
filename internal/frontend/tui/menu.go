@@ -28,7 +28,7 @@ type menu struct {
 
 func (m *Model) refreshMenu() {
 	value := m.input.Value()
-	if m.streaming || !strings.HasPrefix(value, "/") || strings.ContainsAny(value, " \t\n") {
+	if !strings.HasPrefix(value, "/") || strings.ContainsAny(value, " \t\n") {
 		m.menu = menu{}
 		return
 	}
@@ -38,7 +38,7 @@ func (m *Model) refreshMenu() {
 		selected = m.menu.matches[m.menu.cursor].name
 	}
 
-	matches := rankCommands(m.commands(), strings.TrimPrefix(value, "/"))
+	matches := rankCommands(m.available(), strings.TrimPrefix(value, "/"))
 	if len(matches) == 0 {
 		m.menu = menu{}
 		return

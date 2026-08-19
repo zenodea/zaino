@@ -14,6 +14,9 @@ type sheet struct {
 	title  string
 	lines  []string
 	offset int
+
+	// Opened from a permission question, so the question's keys still answer.
+	ask bool
 }
 
 func (m *Model) show(title string, lines []string) tea.Cmd {
@@ -76,12 +79,16 @@ func (m *Model) sheetView() string {
 }
 
 func (m *Model) sheetFooter() string {
+	back := "esc or q to go back"
+	if m.sheet.ask {
+		back = "y allow · a always · n refuse · esc back"
+	}
 	if len(m.sheet.lines) <= m.sheetRows() {
-		return hintStyle.Render("esc or q to go back")
+		return hintStyle.Render(back)
 	}
 
 	shown := min(m.sheet.offset+m.sheetRows(), len(m.sheet.lines))
-	return hintStyle.Render("j/k or ↑↓ scroll · esc back") +
+	return hintStyle.Render("j/k or ↑↓ scroll · "+back) +
 		metaStyle.Render("   "+humanTokens(shown)+" of "+humanTokens(len(m.sheet.lines))+" lines")
 }
 

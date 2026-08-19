@@ -37,6 +37,38 @@ func (m *Model) commands() []command {
 	return append(commandList(), m.custom...)
 }
 
+// What can be run right now. A turn in flight narrows it to the commands that
+// only look: /usage and /agents are most wanted while the model is busy.
+func (m *Model) available() []command {
+	all := m.commands()
+	if !m.streaming {
+		return all
+	}
+	live := all[:0:0]
+	for _, c := range all {
+		if c.live {
+			live = append(live, c)
+		}
+	}
+	return live
+}
+
+func (m *Model) known(name string) bool {
+	_, ok := findCommand(m.commands(), name)
+	return ok
+}
+
+// Whether what is in the composer may run during a turn.
+func (m *Model) typedLive() bool {
+	line := strings.TrimSpace(m.input.Value())
+	if !isCommandLine(line) {
+		return false
+	}
+	name, _ := splitCommand(line)
+	c, ok := findCommand(m.commands(), name)
+	return ok && c.live
+}
+
 func fromFile(c config.Command) command {
 	summary := c.Description
 	if summary == "" {

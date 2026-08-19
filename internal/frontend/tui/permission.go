@@ -53,6 +53,9 @@ func (m *Model) answer(grant permission.Grant) {
 	req := m.pending.req
 	m.pending.reply <- grant
 	m.pending = nil
+	if m.sheet.ask {
+		m.closeSheet()
+	}
 	m.record(session.Permission(req.Tool, string(req.Action), req.Target, decisionName(grant)))
 }
 
@@ -67,7 +70,22 @@ func decisionName(grant permission.Grant) string {
 }
 
 func (m *Model) handleAskKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if m.sheet.ask {
+		switch msg.String() {
+		case "y", "a", "n", "ctrl+c":
+		case "esc", "q", "h", "enter":
+			m.closeSheet()
+			return m, nil
+		default:
+			return m.handleSheetKey(msg)
+		}
+	}
+
 	switch msg.String() {
+	case "tab":
+		m.readPreview()
+		return m, nil
+
 	case "y", "enter":
 		m.answer(permission.Once)
 		return m, nil
@@ -91,6 +109,22 @@ func (m *Model) handleAskKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	return m, nil
+}
+
+// The panel shows the head of a change; this is the whole of it, on a sheet
+// of its own, with the same keys to answer from there.
+func (m *Model) readPreview() {
+	req := m.pending.req
+	if strings.TrimSpace(req.Preview) == "" {
+		return
+	}
+	width := max(m.contentWidth()-2, 24)
+	var lines []string
+	for _, line := range strings.Split(strings.TrimRight(req.Preview, "\n"), "\n") {
+		lines = append(lines, paintDiffLine(clamp(line, width), req.Action))
+	}
+	m.show(verb(req.Action)+" "+req.Target, lines)
+	m.sheet.ask = true
 }
 
 func (m *Model) askView() string {
@@ -179,7 +213,8 @@ func previewLines(req permission.Request, width int) []string {
 		out = append(out, paintDiffLine(clamp(line, width), req.Action))
 	}
 	if hidden > 0 {
-		out = append(out, metaStyle.Render(fmt.Sprintf("… %d more lines", hidden)))
+		out = append(out, metaStyle.Render(fmt.Sprintf("… %d more lines", hidden))+
+			metaStyle.Render("  ·  ")+keyHint("⇥", "read it all"))
 	}
 	return out
 }

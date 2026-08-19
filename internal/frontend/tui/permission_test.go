@@ -2,6 +2,7 @@ package tui
 
 import (
 	"context"
+	"fmt"
 	"sort"
 	"strings"
 	"testing"
@@ -215,5 +216,58 @@ func TestNarrowTerminalKeepsEveryKey(t *testing.T) {
 		if !strings.Contains(view, key+" ") {
 			t.Errorf("key %q missing at 44 columns:\n%s", key, view)
 		}
+	}
+}
+
+func TestTabReadsTheWholeChange(t *testing.T) {
+	m := newTestModel(t, 80, 24)
+	req := editRequest()
+	var long []string
+	for i := range 40 {
+		long = append(long, fmt.Sprintf("+ line %d", i))
+	}
+	req.Preview = strings.Join(long, "\n")
+	reply := make(chan permission.Grant, 1)
+	m.pending = &pendingAsk{req: req, reply: reply}
+
+	if !strings.Contains(stripANSI(m.askView()), "24 more lines") {
+		t.Fatalf("the panel should say what it is hiding:\n%s", stripANSI(m.askView()))
+	}
+
+	send(m, pressKey("tab"))
+	if !m.sheet.open || !m.sheet.ask {
+		t.Fatal("tab did not open the change on a sheet")
+	}
+	if len(m.sheet.lines) != 40 {
+		t.Errorf("sheet holds %d lines, want all 40", len(m.sheet.lines))
+	}
+	if m.pending == nil {
+		t.Fatal("reading the change must not answer the question")
+	}
+
+	send(m, pressKey("G"))
+	if m.sheet.offset == 0 {
+		t.Error("G should scroll to the end")
+	}
+
+	send(m, pressKey("y"))
+	if m.pending != nil || m.sheet.open {
+		t.Error("answering from the sheet should answer and close it")
+	}
+	if got := <-reply; got != permission.Once {
+		t.Errorf("grant = %v, want Once", got)
+	}
+}
+
+func TestEscLeavesTheSheetNotTheQuestion(t *testing.T) {
+	m := newTestModel(t, 80, 24)
+	m.pending = &pendingAsk{req: editRequest(), reply: make(chan permission.Grant, 1)}
+
+	send(m, pressKey("tab"), pressKey("esc"))
+	if m.sheet.open {
+		t.Error("esc should close the sheet")
+	}
+	if m.pending == nil {
+		t.Error("esc from the sheet must not refuse the question")
 	}
 }

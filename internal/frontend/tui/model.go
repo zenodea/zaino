@@ -361,9 +361,9 @@ func (m *Model) handleAppKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	if m.menu.open {
 		switch msg.String() {
-		case "up", "ctrl+p":
+		case "up", "ctrl+p", "ctrl+k":
 			return m, m.moveMenu(-1)
-		case "down", "ctrl+n":
+		case "down", "ctrl+n", "ctrl+j":
 			return m, m.moveMenu(1)
 		case "tab":
 			m.complete()
@@ -395,19 +395,35 @@ func (m *Model) handleAppKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case "enter":
-		if m.streaming {
+		if m.toggleSelected() {
 			return m, nil
 		}
-		if m.toggleSelected() {
+		if m.streaming && !m.typedLive() {
+			if line := strings.TrimSpace(m.input.Value()); isCommandLine(line) {
+				if name, _ := splitCommand(line); m.known(name) {
+					m.notice("/%s waits for the turn to finish", name)
+				}
+			}
 			return m, nil
 		}
 		return m, m.submit()
 
-	case "ctrl+j":
+	// ⌃↑/⌃↓ for terminals where a multiplexer has claimed ⌃j/⌃k; and once
+	// the bar is up, plain j/k, since there is nothing else for them to do
+	// until you type something.
+	case "ctrl+j", "ctrl+down":
 		return m, m.moveCursor(1)
 
-	case "ctrl+k":
+	case "ctrl+k", "ctrl+up":
 		return m, m.moveCursor(-1)
+
+	case "j", "k":
+		if m.cursor >= 0 && strings.TrimSpace(m.input.Value()) == "" {
+			if msg.String() == "j" {
+				return m, m.moveCursor(1)
+			}
+			return m, m.moveCursor(-1)
+		}
 
 	case "alt+enter", "shift+enter", "ctrl+o":
 		m.input.InsertString("\n")
@@ -713,10 +729,12 @@ func (m *Model) transcript() string {
 	var out []string
 	previous := entryNotice
 
-	// Where each entry lands is recorded as the transcript is built. Counting it
-	// again afterwards means counting the blank lines between entries too.
+	// Where each entry lands is recorded as the transcript is built, in lines:
+	// an entry is one element of out but as many lines as it wraps to, and the
+	// bar, the trail and the scroll all count lines.
 	m.tops = make([]int, len(m.entries))
 	m.heights = make([]int, len(m.entries))
+	line := 0
 
 	for i, rendered := range m.rendered {
 		if rendered == "" {
@@ -725,19 +743,21 @@ func (m *Model) transcript() string {
 		kind := m.entries[i].kind
 
 		if len(out) > 0 && !(tight(previous) && tight(kind)) {
-			out = append(out, m.blankRow(len(out)))
+			out = append(out, m.blankRow(line))
+			line++
 		}
 
-		m.tops[i] = len(out)
+		m.tops[i] = line
 		height := strings.Count(rendered, "\n") + 1
 		m.heights[i] = height
 
 		// Bars do not change how anything wraps — they sit in the gutter that
 		// is already there — so the line count is the same either way.
-		if bars := m.barsWithin(len(out), height); len(bars) > 0 {
+		if bars := m.barsWithin(line, height); len(bars) > 0 {
 			rendered = m.entries[i].renderAs(m.contentWidth(), bars)
 		}
 		out = append(out, rendered)
+		line += height
 		previous = kind
 	}
 	return strings.Join(out, "\n")
@@ -810,7 +830,7 @@ func (m *Model) resize(width, height int) {
 func (m *Model) viewportHeight() int {
 	// The menu is not in this sum: it floats over the transcript rather than
 	// pushing it, so opening it must not resize anything underneath.
-	chrome := 1 + 1 + 1 + 1 + m.input.Height() + m.chooserHeight() + 1
+	chrome := 1 + 1 + 1 + 1 + 1 + m.input.Height() + m.chooserHeight() + 1
 	return max(m.height-chrome, 3)
 }
 
@@ -903,21 +923,24 @@ func (m *Model) View() string {
 		}, "\n")
 	}
 
-	body := pad.Render(m.viewport.View())
+	// The blank under the transcript is always there: the last thing said never
+	// sits on the rule, panel or no panel. The menu floats over the gap too, so
+	// it comes down onto the rule as before.
+	ground := pad.Render(m.viewport.View()) + "\n"
 
 	var below []string
 	switch {
 	case m.limitView() != "":
-		below = []string{"", pad.Render(m.limitView())}
+		below = []string{pad.Render(m.limitView())}
 	case m.askView() != "":
-		below = []string{"", pad.Render(m.askView())}
+		below = []string{pad.Render(m.askView())}
 	case m.chooserView() != "":
-		below = []string{"", pad.Render(m.chooserView())}
+		below = []string{pad.Render(m.chooserView())}
 	case m.menuView() != "":
-		body = overlay(body, pad.Render(m.menuView()))
+		ground = overlay(ground, pad.Render(m.menuView()))
 	}
 
-	lines := append([]string{pad.Render(m.header()), "", body}, below...)
+	lines := append([]string{pad.Render(m.header()), "", ground}, below...)
 	lines = append(lines,
 		pad.Render(rule(m.contentWidth())),
 		pad.Render(m.inputView()),
@@ -1021,7 +1044,7 @@ func (m *Model) hints() []string {
 
 	case m.menu.open:
 		return []string{
-			"⇥ complete · ⏎ run · ↑↓ choose · esc dismiss",
+			"⇥ complete · ⏎ run · ↑↓ or ⌃j ⌃k choose · esc dismiss",
 			"⇥ complete · ⏎ run · esc dismiss",
 			"⏎ run · esc",
 		}
@@ -1030,14 +1053,14 @@ func (m *Model) hints() []string {
 		if e, ok := m.selectedEntry(); ok && e.kind == entryTool {
 			if _, spawned := m.taskIndex[e.toolID]; spawned {
 				return []string{
-					"⏎ walk into the agent · ⌃j⌃k move · type to go back to the composer",
-					"⏎ walk in · ⌃j⌃k move",
+					"⏎ walk into the agent · j/k move · type to go back to the composer",
+					"⏎ walk in · j/k move",
 					"⏎ walk in",
 				}
 			}
 		}
 		return []string{
-			"⏎ expand · ⌃j⌃k move · type to go back to the composer",
+			"⏎ expand · j/k move · type to go back to the composer",
 			"⏎ expand · ⌃j⌃k move",
 			"⏎ expand",
 		}
