@@ -6,6 +6,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/zenodea/zaino/internal/llm"
 	"github.com/zenodea/zaino/internal/permission"
@@ -195,5 +196,72 @@ func TestTaskInheritsTheGate(t *testing.T) {
 	defer mu.Unlock()
 	if ran {
 		t.Error("the child wrote something the parent's policy forbids")
+	}
+}
+
+func backgroundTaskTurn(prompt string) string {
+	input, _ := json.Marshal(map[string]any{"description": "dig", "prompt": prompt, "background": true})
+	return sseTurn(
+		turnStart,
+		`data: {"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"toolu_bg","name":"task","input":{}}}`,
+		`data: {"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":`+
+			string(mustJSON(string(input)))+`}}`,
+		`data: {"type":"content_block_stop","index":0}`,
+		`data: {"type":"message_delta","delta":{"stop_reason":"tool_use","stop_sequence":null},"usage":{"output_tokens":9}}`,
+		turnStop,
+	)
+}
+
+// The parent's next request and the child's first race for the canned turns,
+// so both are plain text and the test only cares which one the child got.
+func TestBackgroundTaskReturnsAtOnceAndReportsLater(t *testing.T) {
+	ag, _ := newTestAgent(t,
+		backgroundTaskTurn("read everything"),
+		textTurn("alpha"),
+		textTurn("beta"),
+	)
+	ag.Tools = []tool.Tool{TaskTool(ag)}
+	ag.Gate = &permission.Gate{Policy: permission.NewPolicy(permission.Bypass)}
+
+	done := make(chan struct{})
+	ag.Hooks.OnTaskDone = func(string, []llm.Message, error) { close(done) }
+
+	history, err := ag.Run(context.Background(), []llm.Message{llm.UserText("go")})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	result := lastResult(t, history)
+	if result.IsError || !strings.Contains(result.Content, "background") {
+		t.Fatalf("the call should have returned at once: %+v", result)
+	}
+
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the child never finished")
+	}
+	var left []llm.Message
+	for deadline := time.Now().Add(5 * time.Second); time.Now().Before(deadline); {
+		if left = ag.Steered(); len(left) > 0 {
+			break
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	if len(left) != 1 {
+		t.Fatalf("Steered() = %+v, want the report", left)
+	}
+	text := left[0].Text()
+	if !strings.Contains(text, "reported back") || !strings.Contains(text, "toolu_bg") ||
+		!(strings.Contains(text, "alpha") || strings.Contains(text, "beta")) {
+		t.Errorf("report = %q", text)
+	}
+}
+
+func TestBackgroundOnlyFromTheMainConversation(t *testing.T) {
+	ag, _ := newTestAgent(t)
+	deep := &Task{parent: ag, depth: 1}
+	_, err := deep.Prepare(json.RawMessage(`{"prompt":"x","background":true}`))
+	if err == nil || !strings.Contains(err.Error(), "main conversation") {
+		t.Errorf("err = %v, want a refusal", err)
 	}
 }

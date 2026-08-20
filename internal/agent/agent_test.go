@@ -326,3 +326,96 @@ func TestSystemPromptIsCachedAndStable(t *testing.T) {
 		t.Error("Stream should be true on the wire")
 	}
 }
+
+func TestSteerRidesWithTheNextToolResults(t *testing.T) {
+	toolTurn := sseTurn(
+		turnStart,
+		`data: {"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"toolu_a","name":"echo","input":{}}}`,
+		`data: {"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"{}"}}`,
+		`data: {"type":"content_block_stop","index":0}`,
+		`data: {"type":"message_delta","delta":{"stop_reason":"tool_use","stop_sequence":null},"usage":{"output_tokens":20}}`,
+		turnStop,
+	)
+	ag, api := newTestAgent(t, toolTurn, textTurn("ok, stopping"))
+
+	var carried []llm.Message
+	ag.Hooks.OnSteer = func(msgs []llm.Message) { carried = msgs }
+	ag.Tools = []tool.Tool{&tool.Func{
+		Def: llm.Tool{Name: "echo", InputSchema: map[string]any{"type": "object"}},
+		Do: func(context.Context, json.RawMessage) (string, error) {
+			// Typed while the tool was running.
+			ag.Steer(llm.UserText("actually, stop there"))
+			return "echoed", nil
+		},
+	}}
+
+	history, err := ag.Run(context.Background(), []llm.Message{llm.UserText("go")})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	results := history[2]
+	if len(results.Content) != 2 {
+		t.Fatalf("the result message holds %d blocks, want the result and the nudge: %+v", len(results.Content), results.Content)
+	}
+	if _, ok := results.Content[0].(llm.ToolResultBlock); !ok {
+		t.Errorf("results must come first, got %T", results.Content[0])
+	}
+	if text, ok := results.Content[1].(llm.TextBlock); !ok || text.Text != "actually, stop there" {
+		t.Errorf("the nudge did not follow the result: %+v", results.Content[1])
+	}
+	if sent := api.request(1).Messages[2]; sent.Text() != "actually, stop there" {
+		t.Errorf("the provider was sent %+v", sent)
+	}
+	if len(carried) != 1 {
+		t.Errorf("OnSteer saw %d messages, want 1", len(carried))
+	}
+	if left := ag.Steered(); len(left) != 0 {
+		t.Errorf("nothing should be left over, got %+v", left)
+	}
+}
+
+func TestSteerAfterTheLastBoundaryIsLeftOver(t *testing.T) {
+	ag, _ := newTestAgent(t, textTurn("done"))
+	ag.Steer(llm.UserText("too late"))
+
+	if _, err := ag.Run(context.Background(), []llm.Message{llm.UserText("go")}); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if left := ag.Steered(); len(left) != 1 || left[0].Text() != "too late" {
+		t.Errorf("Steered() = %+v, want the unsent message back", left)
+	}
+}
+
+func TestToolProgressReachesTheHooks(t *testing.T) {
+	toolTurn := sseTurn(
+		turnStart,
+		`data: {"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"toolu_p","name":"slow","input":{}}}`,
+		`data: {"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"{}"}}`,
+		`data: {"type":"content_block_stop","index":0}`,
+		`data: {"type":"message_delta","delta":{"stop_reason":"tool_use","stop_sequence":null},"usage":{"output_tokens":20}}`,
+		turnStop,
+	)
+	ag, _ := newTestAgent(t, toolTurn, textTurn("done"))
+
+	var got []string
+	ag.Hooks.OnToolProgress = func(call llm.ToolUseBlock, chunk string) {
+		got = append(got, call.ID+":"+chunk)
+	}
+	ag.Tools = []tool.Tool{&tool.Func{
+		Def: llm.Tool{Name: "slow", InputSchema: map[string]any{"type": "object"}},
+		Do: func(ctx context.Context, _ json.RawMessage) (string, error) {
+			report := tool.Progress(ctx)
+			report("a")
+			report("b")
+			return "ab", nil
+		},
+	}}
+
+	if _, err := ag.Run(context.Background(), []llm.Message{llm.UserText("go")}); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if strings.Join(got, " ") != "toolu_p:a toolu_p:b" {
+		t.Errorf("progress = %v", got)
+	}
+}

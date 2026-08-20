@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"sync"
 
 	"github.com/zenodea/zaino/internal/llm"
 	"github.com/zenodea/zaino/internal/x/httpx"
@@ -61,6 +62,9 @@ type Client struct {
 	baseURL string
 	model   string
 	http    *httpx.Client
+
+	pricesMu sync.Mutex
+	prices   map[string]llm.Price
 }
 
 type Option func(*Client)

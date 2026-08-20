@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/zenodea/zaino/internal/pricing"
 	"io"
 	"os"
 	"strings"
@@ -62,6 +63,13 @@ func Run(ag *agent.Agent, o Options) error {
 		}
 	}
 	usage := o.Restored.Usage
+	prices := pricing.Known()
+	if o.Config != nil {
+		for id, p := range o.Config.Prices {
+			prices.Set(id, llm.Price{Input: p.Input, Output: p.Output, CacheRead: p.CacheRead, CacheWrite: p.CacheWrite})
+		}
+	}
+	var cost float64
 	ag.Hooks.OnTurn = func(resp *llm.Response) {
 		u := resp.Usage
 		addUsage(&usage, u)
@@ -69,11 +77,17 @@ func Run(ag *agent.Agent, o Options) error {
 		o.Recorder.Turn(u)
 		o.Wire.Turn(resp.Model, resp.StopReason, u)
 
+		spent, priced := prices.Cost(resp.Model, u)
+		cost += spent
 		if o.Verbose {
+			money := ""
+			if priced {
+				money = fmt.Sprintf(" $%.4f", cost)
+			}
 			fmt.Fprintf(os.Stderr,
-				"\n\x1b[2m[%s in=%d out=%d think=%d cache_read=%d stop=%s]\x1b[0m\n",
+				"\n\x1b[2m[%s in=%d out=%d think=%d cache_read=%d stop=%s%s]\x1b[0m\n",
 				resp.Model, u.InputTokens, u.OutputTokens, u.ThinkingTokens,
-				u.CacheReadTokens, resp.StopReason)
+				u.CacheReadTokens, resp.StopReason, money)
 		}
 	}
 
@@ -213,6 +227,9 @@ func runTurn(ag *agent.Agent, interrupts *interrupts, messages []llm.Message,
 	for _, what := range attached {
 		fmt.Fprintf(os.Stderr, "\x1b[2m⧉ %s\x1b[0m\n", what)
 	}
+	// Reports from background agents that came in while waiting on the
+	// prompt go ahead of it.
+	messages = append(messages, ag.Steered()...)
 	messages = append(messages, llm.Message{Role: llm.RoleUser, Content: content})
 
 	for {
@@ -222,6 +239,11 @@ func runTurn(ag *agent.Agent, interrupts *interrupts, messages []llm.Message,
 		interrupts.unbind()
 		cancel()
 		messages = updated
+
+		if left := ag.Steered(); err == nil && len(left) > 0 {
+			messages = append(messages, left...)
+			continue
+		}
 
 		if saveErr := rec.Messages(messages); saveErr != nil {
 			fmt.Fprintln(os.Stderr, "\x1b[31msession not being saved: "+saveErr.Error()+"\x1b[0m")

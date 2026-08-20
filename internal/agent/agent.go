@@ -17,6 +17,7 @@ type Hooks struct {
 	OnThinkingDelta func(text string)
 	OnToolCall      func(call llm.ToolUseBlock)
 	OnToolResult    func(call llm.ToolUseBlock, result string, isError bool)
+	OnToolProgress  func(call llm.ToolUseBlock, chunk string)
 	OnTurn          func(resp *llm.Response)
 	OnCompact       func(summary string, kept []llm.Message)
 
@@ -24,6 +25,10 @@ type Hooks struct {
 	OnTask func(info TaskInfo) Hooks
 
 	OnTaskDone func(id string, history []llm.Message, err error)
+
+	// OnSteer is called when something said mid-turn has gone in with a
+	// batch of tool results.
+	OnSteer func(msgs []llm.Message)
 }
 
 type Agent struct {
@@ -62,6 +67,11 @@ type Agent struct {
 	meter meter
 
 	allowOnce bool
+
+	// What was said while a turn was running, waiting for the next tool
+	// boundary to go in.
+	steerMu sync.Mutex
+	steered []llm.Message
 }
 
 const (
@@ -101,6 +111,24 @@ func (a *Agent) Window() int {
 		return 0
 	}
 	return a.Compaction.window()
+}
+
+// Steer hands a running turn something said while it worked. It travels with
+// the next tool results, so the model reads it before choosing what to do
+// next; a turn that ends first leaves it behind for Steered to collect.
+func (a *Agent) Steer(msg llm.Message) {
+	a.steerMu.Lock()
+	defer a.steerMu.Unlock()
+	a.steered = append(a.steered, msg)
+}
+
+// Steered takes whatever Steer was given that no tool boundary carried.
+func (a *Agent) Steered() []llm.Message {
+	a.steerMu.Lock()
+	defer a.steerMu.Unlock()
+	out := a.steered
+	a.steered = nil
+	return out
 }
 
 func (a *Agent) Run(ctx context.Context, history []llm.Message) ([]llm.Message, error) {
@@ -144,6 +172,16 @@ func (a *Agent) Run(ctx context.Context, history []llm.Message) ([]llm.Message, 
 		switch resp.StopReason {
 		case llm.StopToolUse:
 			results := a.runTools(ctx, resp.ToolUses())
+			// Results first, then what was said meanwhile: one message, so
+			// the model sees the nudge beside the evidence it was waiting on.
+			if steered := a.Steered(); len(steered) > 0 {
+				for _, s := range steered {
+					results = append(results, s.Content...)
+				}
+				if a.Hooks.OnSteer != nil {
+					a.Hooks.OnSteer(steered)
+				}
+			}
 			history = append(history, llm.Message{
 				Role:    llm.RoleUser,
 				Content: results,
@@ -290,7 +328,11 @@ func (a *Agent) execute(ctx context.Context, call llm.ToolUseBlock, ready tool.C
 		}
 	}()
 
-	out, err := ready.Run(tool.WithCallID(ctx, call.ID))
+	ctx = tool.WithCallID(ctx, call.ID)
+	if on := a.Hooks.OnToolProgress; on != nil {
+		ctx = tool.WithProgress(ctx, func(chunk string) { on(call, chunk) })
+	}
+	out, err := ready.Run(ctx)
 	if err != nil {
 		return a.result(call, "Error: "+err.Error(), true)
 	}

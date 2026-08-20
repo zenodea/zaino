@@ -38,6 +38,17 @@ type File struct {
 	Deny          []string           `json:"deny,omitempty"`
 	Profile       string             `json:"profile,omitempty"`
 	Profiles      map[string]Profile `json:"profiles,omitempty"`
+
+	// What a model costs, per million tokens, for the ones zaino does not
+	// know or the host does not say.
+	Prices map[string]Price `json:"prices,omitempty"`
+}
+
+type Price struct {
+	Input      float64 `json:"input"`
+	Output     float64 `json:"output"`
+	CacheRead  float64 `json:"cache-read,omitempty"`
+	CacheWrite float64 `json:"cache-write,omitempty"`
 }
 
 type Profile struct {

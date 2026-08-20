@@ -56,9 +56,14 @@ error if there was one. The bar walks the lines between entries rather than
 jumping, leaving a tail that thins and dims behind it. `-animate=false`
 turns the theatrics off.
 
-While a turn runs the composer still takes the commands that only look —
-`/usage`, `/agents`, `/tools`, `/help`, `/config`, `/permission`, `/vim` — and
-the `/` menu narrows to them. Anything else waits for the turn to finish.
+A turn in flight does not lock the composer. Type and `⏎` and what you said
+goes in at the next tool call, beside the results the model was waiting on,
+so "not that file, the other one" lands before it has gone further rather
+than after it has finished. A turn that ends with something still queued
+sends it as the next prompt; one that stops early gives it back to the
+composer. The commands that only look — `/usage`, `/agents`, `/tools`,
+`/help`, `/config`, `/permission`, `/vim` — run at any time, and the `/` menu
+narrows to them mid-turn; the rest wait for the turn to finish.
 
 `esc` and `⌃c` stop a running turn. With nothing running, `⌃c` arms the
 quit and says so in the footer; a second press leaves, any other key stands
@@ -92,6 +97,10 @@ rather than permission:
 
 If a file changes on disk between an edit being worked out and being
 allowed, the write is refused rather than clobbering the other writer.
+
+A `bash` command that runs for a while shows its last few lines on the card
+as they arrive, so a long test run is seen to be getting somewhere; `⏎` on
+the card shows everything so far.
 
 `fetch` gets a URL back as text with the markup stripped — the tool that
 lets the model check what an API actually documents rather than what it
@@ -133,22 +142,32 @@ Children are recorded with the session, so a resumed conversation still has
 them to walk into. Nesting stops two deep, and `-no-subagents` withholds
 the tool entirely.
 
+A child can also be started in the background: the call returns at once
+with the child's id and the model carries on, and the report arrives as a
+message when the child is done — with the next tool results if the model is
+still working, or as a fresh turn if it had finished. The card and `/agents`
+follow it either way, and a background child outlives the turn that started
+it, so `esc` leaves it running and `x` on the board is what stops it.
+
 Describe your own agents in `agents/*.md` — what each is for, which tools
 it may use, which model it runs on — and `task` offers them by name. See
 Configuration, below.
 
-## Pictures
+## Files and pictures
 
-An `@` and a path attaches an image to what you are typing, which is what a
+An `@` and a path attaches a file to what you are typing, which is what a
 file dropped onto the terminal leaves behind:
 
     why is the spacing wrong in @shot.png
+    does @internal/agent/task.go handle the cancel right
 
-PNG, JPEG, GIF and WebP, up to five megabytes. A prompt that merely
-mentions `shot.png` is only talking about it; the `@` is what sends it. A
-mention that will not load stops the turn rather than quietly going
-without. `read` hands back a picture too, so the model can look at anything
-in the workspace on its own.
+Text files up to 256 KB go in whole, fenced and named; PNG, JPEG, GIF and
+WebP up to five megabytes go in as pictures. A prompt that merely mentions
+`shot.png` is only talking about it; the `@` is what sends it. A picture that
+will not load stops the turn rather than quietly going without; an `@` in
+front of something that is not a file — `@someone` — is just a word. `read`
+hands back a picture too, so the model can look at anything in the workspace
+on its own.
 
 ## Sessions
 
@@ -181,6 +200,14 @@ reserve, everything but the recent stretch is folded into one summary and
 the conversation carries on from there. `/compact` does it on demand,
 `-no-compact` turns it off, and the trigger uses what the provider actually
 counted, not an estimate.
+
+`/usage` puts a dollar figure on the run, and the footer carries it. Claude
+models are priced from Anthropic's list; OpenRouter says what each of its
+models costs when the list is fetched, and that is believed; anything else
+is named as uncounted until you put it under `"prices"` in the config, per
+million tokens:
+
+    "prices": {"nvidia/nemotron-3-ultra": {"input": 0.5, "output": 2, "cache-read": 0.05}}
 
 Anthropic's prompt caching is marked so every turn after the first reads
 the prefix back at a tenth of the price; Gemini caches what it recognises

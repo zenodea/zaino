@@ -3,6 +3,7 @@ package openaicompat
 import (
 	"context"
 	"io"
+	"math"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -83,5 +84,32 @@ func TestFetchModelsReportsAnAPIError(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "bad key") {
 		t.Errorf("got %v", err)
+	}
+}
+
+func TestFetchModelsLearnsWhatTheHostCharges(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		io.WriteString(w, `{"data":[
+			{"id":"vendor/cheap","pricing":{"prompt":"0.0000005","completion":"0.000002","input_cache_read":"0.00000005"}},
+			{"id":"vendor/silent"}]}`)
+	}))
+	defer server.Close()
+
+	c, err := New(Config{Name: "test", BaseURL: server.URL, DefaultModel: "vendor/cheap"}, WithAPIKey("k"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.FetchModels(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+
+	prices := c.Prices()
+	p, ok := prices["vendor/cheap"]
+	near := func(got, want float64) bool { return math.Abs(got-want) < 1e-9 }
+	if !ok || !near(p.Input, 0.5) || !near(p.Output, 2) || !near(p.CacheRead, 0.05) {
+		t.Errorf("cheap = %+v %v, want per-million figures", p, ok)
+	}
+	if _, ok := prices["vendor/silent"]; ok {
+		t.Error("a model with no pricing must not be priced")
 	}
 }

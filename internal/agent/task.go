@@ -24,6 +24,7 @@ type TaskInfo struct {
 	Agent       string
 	Model       string
 	Depth       int
+	Background  bool
 	Cancel      context.CancelFunc
 }
 
@@ -41,6 +42,7 @@ type taskArgs struct {
 	Description string `json:"description"`
 	Prompt      string `json:"prompt"`
 	Agent       string `json:"agent,omitempty"`
+	Background  bool   `json:"background,omitempty"`
 }
 
 func (t *Task) Action() permission.Action { return permission.Read }
@@ -51,11 +53,15 @@ func (t *Task) Definition() llm.Tool {
 		"something out would otherwise mean reading a lot into this one — searching a " +
 		"codebase, checking a claim across many files, surveying how something is used. " +
 		"It cannot ask you anything, so say everything it needs in the prompt, and tell it " +
-		"what to report back."
+		"what to report back. By default the call waits for the answer. Set background " +
+		"when the job is long or you have other work meanwhile: the call returns at once " +
+		"and the report arrives as a message when it is done — with your next tool results " +
+		"if you are still working, or as a new turn if you had finished."
 
 	properties := map[string]any{
 		"description": field("string", "A few words naming the job, for the transcript."),
 		"prompt":      field("string", "Everything the second agent needs, and what to report back."),
+		"background":  field("boolean", "Return at once and have the report delivered later as a message."),
 	}
 
 	if named := t.parent.Subagents; len(named) > 0 {
@@ -89,6 +95,11 @@ func (t *Task) Prepare(input json.RawMessage) (tool.Call, error) {
 	if t.depth >= maxTaskDepth {
 		return nil, fmt.Errorf("already %d agents deep — do this one yourself", t.depth)
 	}
+	// A report has to land somewhere that is still listening; only the main
+	// conversation is.
+	if args.Background && t.depth > 0 {
+		return nil, fmt.Errorf("background agents can only be started from the main conversation")
+	}
 
 	var named Subagent
 	if args.Agent != "" {
@@ -105,15 +116,17 @@ func (t *Task) Prepare(input json.RawMessage) (tool.Call, error) {
 	if what == "" {
 		what = orDefault(named.Name, "task")
 	}
-	return &taskCall{parent: t.parent, depth: t.depth, what: what, prompt: args.Prompt, agent: named}, nil
+	return &taskCall{parent: t.parent, depth: t.depth, what: what, prompt: args.Prompt,
+		agent: named, background: args.Background}, nil
 }
 
 type taskCall struct {
-	parent *Agent
-	depth  int
-	what   string
-	prompt string
-	agent  Subagent
+	parent     *Agent
+	depth      int
+	what       string
+	prompt     string
+	agent      Subagent
+	background bool
 }
 
 // The gate the child inherits is the parent's, so a subagent cannot be used to
@@ -128,9 +141,36 @@ func (c *taskCall) Request() permission.Request {
 }
 
 func (c *taskCall) Run(ctx context.Context) (string, error) {
-	ctx, cancel := context.WithCancel(ctx)
-	defer cancel()
+	id := tool.CallID(ctx)
 
+	// A background child outlives the turn that started it, so it is cut
+	// from the turn's context; its own cancel is what /agents stops it with.
+	if c.background {
+		ctx = context.Background()
+	}
+	ctx, cancel := context.WithCancel(ctx)
+
+	child, info, err := c.spawn(id, cancel)
+	if err != nil {
+		cancel()
+		return "", err
+	}
+
+	if !c.background {
+		defer cancel()
+		return c.await(ctx, child, info)
+	}
+
+	go func() {
+		defer cancel()
+		answer, err := c.await(ctx, child, info)
+		c.parent.Steer(llm.UserText(report(info, answer, err)))
+	}()
+	return fmt.Sprintf("Started %q in the background as agent %s. Its report will arrive "+
+		"as a message when it is done; carry on meanwhile.", c.what, id), nil
+}
+
+func (c *taskCall) spawn(id string, cancel context.CancelFunc) (*Agent, TaskInfo, error) {
 	child := &Agent{
 		Provider:  c.parent.Provider,
 		Model:     orDefault(c.agent.Model, c.parent.Model),
@@ -145,11 +185,12 @@ func (c *taskCall) Run(ctx context.Context) (string, error) {
 	}
 
 	info := TaskInfo{
-		ID:          tool.CallID(ctx),
+		ID:          id,
 		Description: c.what,
 		Agent:       c.agent.Name,
 		Model:       child.Model,
 		Depth:       c.depth + 1,
+		Background:  c.background,
 		Cancel:      cancel,
 	}
 	if on := c.parent.Hooks.OnTask; on != nil {
@@ -158,10 +199,13 @@ func (c *taskCall) Run(ctx context.Context) (string, error) {
 
 	tools, err := c.agent.toolbox(c.parent.Tools)
 	if err != nil {
-		return "", fmt.Errorf("%s: %w", c.what, err)
+		return nil, info, fmt.Errorf("%s: %w", c.what, err)
 	}
 	child.Tools = deepen(tools, child, c.depth+1)
+	return child, info, nil
+}
 
+func (c *taskCall) await(ctx context.Context, child *Agent, info TaskInfo) (string, error) {
 	history, err := child.Run(ctx, []llm.Message{llm.UserText(c.prompt)})
 	if done := c.parent.Hooks.OnTaskDone; done != nil {
 		done(info.ID, history, err)
@@ -175,6 +219,15 @@ func (c *taskCall) Run(ctx context.Context) (string, error) {
 		return "", fmt.Errorf("%s finished without saying anything", c.what)
 	}
 	return answer, nil
+}
+
+// What a background child's report looks like when it lands in the
+// conversation: named, so the model knows which job it is hearing back from.
+func report(info TaskInfo, answer string, err error) string {
+	if err != nil {
+		return fmt.Sprintf("Background agent %s (%q) failed: %v", info.ID, info.Description, err)
+	}
+	return fmt.Sprintf("Background agent %s (%q) reported back:\n\n%s", info.ID, info.Description, answer)
 }
 
 // The child gets the same tools, except that its own task tool knows how deep

@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -200,18 +201,63 @@ func TestResetClears(t *testing.T) {
 	}
 }
 
-func TestEnterIgnoredWhileStreaming(t *testing.T) {
+func TestEnterQueuesAPromptWhileStreaming(t *testing.T) {
 	m := newTestModel(t, 80, 24)
 	m.streaming = true
 	m.input.SetValue("second question")
 
 	m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 
-	if m.input.Value() != "second question" {
-		t.Errorf("input should be left intact, got %q", m.input.Value())
+	if m.input.Value() != "" {
+		t.Errorf("the prompt was not taken: %q", m.input.Value())
 	}
-	if len(m.entries) != 0 {
-		t.Errorf("no entry should be pushed, got %+v", m.entries)
+	if len(m.entries) != 1 || m.entries[0].kind != entryUser {
+		t.Fatalf("want the prompt on the transcript, got %+v", m.entries)
+	}
+	if m.steered != 1 {
+		t.Errorf("steered = %d, want 1 waiting", m.steered)
+	}
+	if got := m.agent.Steered(); len(got) != 1 || got[0].Text() != "second question" {
+		t.Errorf("the agent was not handed the prompt: %+v", got)
+	}
+	if len(m.messages) != 0 {
+		t.Errorf("the conversation must not grow until the boundary carries it: %+v", m.messages)
+	}
+}
+
+func TestWhatWasLeftUnsaidBecomesTheNextPrompt(t *testing.T) {
+	m := newTestModel(t, 80, 24)
+	m.streaming = true
+	m.input.SetValue("and then this")
+	m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+
+	history := []llm.Message{llm.UserText("first"), {Role: llm.RoleAssistant, Content: llm.Content{llm.TextBlock{Text: "done"}}}}
+	m.Update(doneMsg{Messages: history})
+
+	if !m.streaming {
+		t.Fatal("a turn that ended well should start again with what was queued")
+	}
+	if n := len(m.messages); n != 3 || m.messages[2].Text() != "and then this" {
+		t.Errorf("messages = %d, want the queued prompt appended: %+v", n, m.messages)
+	}
+	if m.steered != 0 {
+		t.Errorf("steered = %d after it went in", m.steered)
+	}
+}
+
+func TestWhatWasLeftUnsaidComesBackAfterAnError(t *testing.T) {
+	m := newTestModel(t, 80, 24)
+	m.streaming = true
+	m.input.SetValue("and then this")
+	m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+
+	m.Update(doneMsg{Messages: []llm.Message{llm.UserText("first")}, Err: context.Canceled})
+
+	if m.streaming {
+		t.Fatal("an interrupted turn must not start again on its own")
+	}
+	if m.input.Value() != "and then this" {
+		t.Errorf("composer = %q, want the unsent prompt back", m.input.Value())
 	}
 }
 
@@ -262,5 +308,36 @@ func TestToolCallsOpenUnderTheBarMidTurn(t *testing.T) {
 	m.Update(tea.KeyMsg{Type: tea.KeyCtrlJ})
 	if m.cursor >= 0 {
 		t.Errorf("walking off the end should clear the bar, cursor = %d", m.cursor)
+	}
+}
+
+func TestARunningCommandShowsItsTail(t *testing.T) {
+	m := newTestModel(t, 80, 24)
+	call := llm.ToolUseBlock{ID: "b1", Name: "bash", Input: []byte(`{"command":"go test ./..."}`)}
+	m.Update(toolCallMsg{Call: call})
+
+	m.Update(toolProgressMsg{Call: call, Chunk: "ok  pkg/a\n"})
+	m.Update(toolProgressMsg{Call: call, Chunk: "ok  pkg/b\nok  pkg/c\nok  pkg/d\n"})
+
+	view := stripANSI(m.View())
+	if strings.Contains(view, "pkg/a") {
+		t.Error("the tail should hold only the last few lines")
+	}
+	for _, want := range []string{"pkg/b", "pkg/c", "pkg/d"} {
+		if !strings.Contains(view, want) {
+			t.Errorf("the card is missing %q:\n%s", want, view)
+		}
+	}
+	if m.entries[0].done {
+		t.Error("progress must not mark the call done")
+	}
+
+	m.Update(toolResultMsg{Call: call, Result: "ok  pkg/a\nok  pkg/b\nok  pkg/c\nok  pkg/d\nPASS"})
+	view = stripANSI(m.View())
+	if strings.Contains(view, "pkg/d") && !m.entries[0].expanded {
+		t.Error("once done, the tail should fold away into the card")
+	}
+	if m.entries[0].toolResult != "ok  pkg/a\nok  pkg/b\nok  pkg/c\nok  pkg/d\nPASS" {
+		t.Errorf("the result should replace the partial output, got %q", m.entries[0].toolResult)
 	}
 }

@@ -36,11 +36,12 @@ type task struct {
 	model string
 	depth int
 
-	started time.Time
-	ended   time.Time
-	done    bool
-	failed  bool
-	cancel  context.CancelFunc
+	started    time.Time
+	ended      time.Time
+	done       bool
+	failed     bool
+	background bool
+	cancel     context.CancelFunc
 
 	entries  []entry
 	rendered []string
@@ -55,6 +56,9 @@ func (t *task) note() string {
 	var parts []string
 	if t.agent != "" {
 		parts = append(parts, t.agent)
+	}
+	if t.background {
+		parts = append(parts, "background")
 	}
 	if t.done {
 		parts = append(parts, plural(t.calls, "tool"))
@@ -100,6 +104,9 @@ func (m *Model) taskHooks(emit func(tea.Msg), info agent.TaskInfo) agent.Hooks {
 		OnToolResult: func(call llm.ToolUseBlock, result string, isError bool) {
 			wrap(toolResultMsg{Call: call, Result: result, IsError: isError})
 		},
+		OnToolProgress: func(call llm.ToolUseBlock, chunk string) {
+			wrap(toolProgressMsg{Call: call, Chunk: chunk})
+		},
 		OnTurn: func(resp *llm.Response) {
 			wrap(turnMsg{Model: resp.Model, Usage: resp.Usage, Stop: resp.StopReason})
 		},
@@ -115,13 +122,14 @@ func (m *Model) taskHooks(emit func(tea.Msg), info agent.TaskInfo) agent.Hooks {
 
 func (m *Model) startTask(msg taskStartMsg) {
 	t := &task{
-		id:      msg.info.ID,
-		what:    msg.info.Description,
-		agent:   msg.info.Agent,
-		model:   msg.info.Model,
-		depth:   msg.info.Depth,
-		started: time.Now(),
-		cancel:  msg.info.Cancel,
+		id:         msg.info.ID,
+		what:       msg.info.Description,
+		agent:      msg.info.Agent,
+		model:      msg.info.Model,
+		depth:      msg.info.Depth,
+		started:    time.Now(),
+		background: msg.info.Background,
+		cancel:     msg.info.Cancel,
 	}
 	m.tasks = append(m.tasks, t)
 	m.taskIndex[t.id] = t
@@ -153,6 +161,11 @@ func (m *Model) taskEvent(id string, msg tea.Msg) {
 		t.calls++
 		t.lastCall = strings.TrimSpace(e.toolName + " " + e.toolSummary())
 
+	case toolProgressMsg:
+		if at := progressEntry(t.entries, msg); at >= 0 {
+			t.rendered[at] = t.entries[at].render(m.contentWidth())
+		}
+
 	case toolResultMsg:
 		if at := completeEntry(t.entries, msg); at >= 0 {
 			t.rendered[at] = t.entries[at].render(m.contentWidth())
@@ -162,6 +175,7 @@ func (m *Model) taskEvent(id string, msg tea.Msg) {
 		t.turns++
 		addUsage(&t.usage, msg.Usage)
 		addUsage(&m.sessionUsage, msg.Usage)
+		m.charge(msg.Model, msg.Usage)
 		m.wire.Turn(msg.Model, msg.Stop, msg.Usage)
 	}
 	m.updateTaskCard(t)
@@ -195,6 +209,26 @@ func (m *Model) finishTask(msg taskDoneMsg) {
 		Messages:    msg.history,
 		Usage:       t.usage,
 	}))
+
+	if t.background {
+		m.deliverReport(t)
+	}
+}
+
+// A background child's report is already with the agent, via Steer. Mid-turn
+// it rides in with the next tool results; between turns it is the next one.
+func (m *Model) deliverReport(t *task) {
+	m.push(entry{kind: entryNotice, text: fmt.Sprintf("%s reported back", t.what)})
+	if m.streaming {
+		m.steered++
+		return
+	}
+	left := m.agent.Steered()
+	if len(left) == 0 {
+		return
+	}
+	m.messages = append(m.messages, left...)
+	m.runCmd(m.launch())
 }
 
 func (m *Model) appendToTask(t *task, kind entryKind, text string) {

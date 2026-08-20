@@ -633,3 +633,31 @@ func TestMenuWalksOnCtrlJAndCtrlK(t *testing.T) {
 		t.Errorf("cursor = %d after ⌃k, want 0", m.menu.cursor)
 	}
 }
+
+func TestUsageCountsTheCostAndSaysWhatItLeftOut(t *testing.T) {
+	m := newTestModel(t, 80, 24)
+
+	m.Update(turnMsg{Model: "claude-opus-5", Usage: llm.Usage{InputTokens: 1_000_000, OutputTokens: 100_000}})
+	m.Update(turnMsg{Model: "nvidia/nemotron-3-ultra", Usage: llm.Usage{InputTokens: 5000, OutputTokens: 500}})
+
+	if m.sessionCost < 7.49 || m.sessionCost > 7.51 {
+		t.Errorf("cost = %v, want 7.50 for an opus turn", m.sessionCost)
+	}
+	if !strings.Contains(stripANSI(m.footer()), "$7.50") {
+		t.Errorf("footer should carry the cost: %q", stripANSI(m.footer()))
+	}
+
+	m.runCommand("/usage")
+	sheet := stripANSI(strings.Join(m.sheet.lines, "\n"))
+	for _, want := range []string{"$7.50", "not counting", "nvidia/nemotron-3-ultra", "prices"} {
+		if !strings.Contains(sheet, want) {
+			t.Errorf("/usage is missing %q:\n%s", want, sheet)
+		}
+	}
+
+	m.prices.Set("nvidia/nemotron-3-ultra", llm.Price{Input: 1, Output: 2})
+	m.Update(turnMsg{Model: "nvidia/nemotron-3-ultra", Usage: llm.Usage{InputTokens: 1_000_000}})
+	if m.sessionCost < 8.49 || m.sessionCost > 8.51 {
+		t.Errorf("a priced model should count from then on: %v", m.sessionCost)
+	}
+}

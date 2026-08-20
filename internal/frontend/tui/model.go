@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/zenodea/zaino/internal/pricing"
 	"strings"
 	"time"
 
@@ -27,6 +28,14 @@ type (
 	textDeltaMsg  string
 	thinkDeltaMsg string
 	toolCallMsg   struct{ Call llm.ToolUseBlock }
+	// How many steered messages a tool boundary just carried in.
+	steerMsg int
+
+	toolProgressMsg struct {
+		Call  llm.ToolUseBlock
+		Chunk string
+	}
+
 	toolResultMsg struct {
 		Call    llm.ToolUseBlock
 		Result  string
@@ -93,7 +102,13 @@ type Model struct {
 	streaming    bool
 	startedAt    time.Time
 	sessionUsage llm.Usage
-	lastModel    string
+
+	// Dollars spent this run, and the tokens that could not be priced.
+	prices      *pricing.Table
+	sessionCost float64
+	unpriced    llm.Usage
+	unpricedOn  map[string]bool
+	lastModel   string
 
 	pending *pendingAsk
 	limit   limitGate
@@ -109,6 +124,9 @@ type Model struct {
 
 	// Set by an overlay's apply, which cannot return a command itself.
 	queued tea.Cmd
+
+	// Said while a turn was running, not yet carried in by a tool boundary.
+	steered int
 
 	fetched        map[string][]string
 	awaitingModels bool
@@ -147,13 +165,40 @@ func New(ag *agent.Agent, providerName string) *Model {
 		events:    make(chan tea.Msg, 64),
 		cursor:    -1,
 		motion:    motion{barAt: -1, barTo: -1},
+		prices:    pricing.Known(),
 		taskIndex: map[string]*task{},
 		agents:    agentsBoard{viewing: -1},
 	}
 }
 
 func (m *Model) Init() tea.Cmd {
-	return tea.Batch(textarea.Blink, m.spinner.Tick, m.waitForEvent())
+	// The model list is asked for up front, where the host publishes prices
+	// with it: otherwise the first /usage would have nothing to count in.
+	return tea.Batch(textarea.Blink, m.spinner.Tick, m.waitForEvent(), fetchModels(m.agent.Provider))
+}
+
+func (m *Model) charge(model string, u llm.Usage) {
+	cost, ok := m.prices.Cost(model, u)
+	if !ok {
+		addUsage(&m.unpriced, u)
+		if m.unpricedOn == nil {
+			m.unpricedOn = map[string]bool{}
+		}
+		m.unpricedOn[model] = true
+		return
+	}
+	m.sessionCost += cost
+}
+
+func dollars(cost float64) string {
+	switch {
+	case cost == 0:
+		return "$0"
+	case cost < 0.01:
+		return "<$0.01"
+	default:
+		return fmt.Sprintf("$%.2f", cost)
+	}
 }
 
 func (m *Model) waitForEvent() tea.Cmd {
@@ -197,8 +242,19 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		})
 		return m, m.waitForEvent()
 
+	case toolProgressMsg:
+		if at := progressEntry(m.entries, msg); at >= 0 {
+			m.rendered[at] = m.entries[at].render(m.contentWidth())
+			m.syncViewport()
+		}
+		return m, m.waitForEvent()
+
 	case toolResultMsg:
 		m.completeTool(msg)
+		return m, m.waitForEvent()
+
+	case steerMsg:
+		m.steered = max(m.steered-int(msg), 0)
 		return m, m.waitForEvent()
 
 	case taskStartMsg:
@@ -211,7 +267,7 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case taskDoneMsg:
 		m.finishTask(msg)
-		return m, m.waitForEvent()
+		return m, tea.Batch(m.waitForEvent(), m.takeQueued())
 
 	case modelsMsg:
 		return m, m.receiveModels(msg)
@@ -233,6 +289,7 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.sessionUsage.ThinkingTokens += msg.Usage.ThinkingTokens
 		m.sessionUsage.CacheReadTokens += msg.Usage.CacheReadTokens
 		m.sessionUsage.CacheWriteTokens += msg.Usage.CacheWriteTokens
+		m.charge(msg.Model, msg.Usage)
 		return m, m.waitForEvent()
 
 	case compactMsg:
@@ -241,7 +298,7 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case doneMsg:
 		m.finishTurn(msg)
-		return m, m.waitForEvent()
+		return m, tea.Batch(m.waitForEvent(), m.takeQueued())
 
 	case frameMsg:
 		return m, m.step()
@@ -398,11 +455,9 @@ func (m *Model) handleAppKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if m.toggleSelected() {
 			return m, nil
 		}
-		if m.streaming && !m.typedLive() {
-			if line := strings.TrimSpace(m.input.Value()); isCommandLine(line) {
-				if name, _ := splitCommand(line); m.known(name) {
-					m.notice("/%s waits for the turn to finish", name)
-				}
+		if line := strings.TrimSpace(m.input.Value()); m.streaming && isCommandLine(line) && !m.typedLive() {
+			if name, _ := splitCommand(line); m.known(name) {
+				m.notice("/%s waits for the turn to finish", name)
 			}
 			return m, nil
 		}
@@ -562,6 +617,9 @@ func (m *Model) hooks(ctx context.Context) agent.Hooks {
 		OnToolResult: func(call llm.ToolUseBlock, result string, isError bool) {
 			emit(toolResultMsg{Call: call, Result: result, IsError: isError})
 		},
+		OnToolProgress: func(call llm.ToolUseBlock, chunk string) {
+			emit(toolProgressMsg{Call: call, Chunk: chunk})
+		},
 		OnTurn: func(resp *llm.Response) {
 			emit(turnMsg{Model: resp.Model, Usage: resp.Usage, Stop: resp.StopReason})
 		},
@@ -575,6 +633,7 @@ func (m *Model) hooks(ctx context.Context) agent.Hooks {
 		OnTaskDone: func(id string, history []llm.Message, err error) {
 			emit(taskDoneMsg{id: id, history: history, failed: err != nil})
 		},
+		OnSteer: func(msgs []llm.Message) { emit(steerMsg(len(msgs))) },
 	}
 }
 
@@ -596,6 +655,19 @@ func (m *Model) finishTurn(msg doneMsg) {
 		m.messages = msg.Messages
 	}
 	m.saveError(m.rec.Messages(m.messages))
+
+	// What was said after the last tool boundary never went in. A turn that
+	// ended well takes it as the next prompt; one that did not hands it back.
+	left := m.agent.Steered()
+	m.steered = 0
+	if len(left) > 0 {
+		if msg.Err == nil {
+			m.messages = append(m.messages, left...)
+			m.runCmd(m.launch())
+			return
+		}
+		m.showRecalled(left[len(left)-1].Text())
+	}
 
 	var overLimit *agent.ContextLimitError
 
@@ -652,6 +724,20 @@ func (m *Model) completeTool(msg toolResultMsg) {
 	}
 	m.rendered[at] = m.entries[at].render(m.contentWidth())
 	m.syncViewport()
+}
+
+// Output so far goes where the result will: the card shows its tail while the
+// command runs, and the result replaces it when the command is done.
+func progressEntry(entries []entry, msg toolProgressMsg) int {
+	for i := len(entries) - 1; i >= 0; i-- {
+		e := entries[i]
+		if e.kind != entryTool || e.done || e.toolID != msg.Call.ID {
+			continue
+		}
+		entries[i].toolResult += msg.Chunk
+		return i
+	}
+	return -1
 }
 
 // Matched by tool-use ID: several calls of the same tool can be in flight.
@@ -950,6 +1036,13 @@ func (m *Model) View() string {
 	return strings.Join(lines, "\n")
 }
 
+func (m *Model) steeredNote() string {
+	if m.steered == 0 {
+		return ""
+	}
+	return " · " + plural(m.steered, "message") + " goes in at the next tool call"
+}
+
 func (m *Model) header() string {
 	left := brandMark() + " " + brandStyle.Render("zaino")
 
@@ -1019,14 +1112,16 @@ func (m *Model) hints() []string {
 		return []string{"waiting on you · y allow · a session · n refuse", "y · a · n"}
 
 	case m.streaming && m.runningTasks() > 0:
-		return []string{fmt.Sprintf("working %s · %s out · /agents watches them · ⌃c stop",
-			time.Since(m.startedAt).Round(time.Second), plural(m.runningTasks(), "agent")),
-			fmt.Sprintf("%s out · /agents · ⌃c stop", plural(m.runningTasks(), "agent")),
+		return []string{fmt.Sprintf("working %s · %s out · /agents watches them%s · ⌃c stop",
+			time.Since(m.startedAt).Round(time.Second), plural(m.runningTasks(), "agent"), m.steeredNote()),
+			fmt.Sprintf("%s out · /agents%s · ⌃c stop", plural(m.runningTasks(), "agent"), m.steeredNote()),
 			"⌃c stop"}
 
 	case m.streaming:
-		return []string{fmt.Sprintf("working %s · ⌃c stop",
-			time.Since(m.startedAt).Round(time.Second)), "⌃c stop"}
+		return []string{fmt.Sprintf("working %s%s · type to say something as it goes · ⌃c stop",
+			time.Since(m.startedAt).Round(time.Second), m.steeredNote()),
+			fmt.Sprintf("working %s%s · ⌃c stop", time.Since(m.startedAt).Round(time.Second), m.steeredNote()),
+			"⌃c stop"}
 
 	case m.chooser.open && m.chooser.layout == layoutScale:
 		return []string{
@@ -1161,6 +1256,9 @@ func (m *Model) usageLine() string {
 	}
 	if u.CacheReadTokens > 0 {
 		parts = append(parts, humanTokens(u.CacheReadTokens)+"⚡")
+	}
+	if m.sessionCost > 0 {
+		parts = append(parts, dollars(m.sessionCost))
 	}
 	return strings.Join(parts, " ")
 }

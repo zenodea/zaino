@@ -137,3 +137,38 @@ func TestSize(t *testing.T) {
 		}
 	}
 }
+
+func TestPromptCarriesTextFilesToo(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "notes.md"), []byte("# plan\n\n- one\n- two\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(filepath.Join(dir, "pkg"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	content, attached, err := Prompt(dir, "read @notes.md, ask @someone, skip @pkg")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(content) != 2 {
+		t.Fatalf("content = %+v, want the prompt and one file", content)
+	}
+	file, ok := content[1].(llm.TextBlock)
+	if !ok || !strings.Contains(file.Text, "⧉ notes.md") || !strings.Contains(file.Text, "```md\n# plan") {
+		t.Errorf("file block = %+v", content[1])
+	}
+	if len(attached) != 1 || !strings.Contains(attached[0], "notes.md · 4 lines") {
+		t.Errorf("attached = %v", attached)
+	}
+}
+
+func TestAMentionedFileTooBigIsAnError(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "big.log"), make([]byte, MaxTextBytes+1), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := Prompt(dir, "look at @big.log"); err == nil || !strings.Contains(err.Error(), "ceiling") {
+		t.Errorf("err = %v, want a refusal that says why", err)
+	}
+}

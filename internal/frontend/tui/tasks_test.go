@@ -214,3 +214,40 @@ func TestStopOneChildFromTheBoard(t *testing.T) {
 		t.Fatal("x did not reach the child's cancel")
 	}
 }
+
+func TestABackgroundReportStartsTheNextTurnWhenIdle(t *testing.T) {
+	m := newTestModel(t, 80, 24)
+	m.startTask(taskStartMsg{info: agent.TaskInfo{ID: "bg1", Description: "dig", Background: true}})
+	m.agent.Steer(llm.UserText("Background agent bg1 reported back:\n\nfound it"))
+
+	m.Update(taskDoneMsg{id: "bg1", history: []llm.Message{llm.UserText("x")}})
+
+	if !m.streaming {
+		t.Fatal("a report arriving between turns should start one")
+	}
+	if n := len(m.messages); n != 1 || !strings.Contains(m.messages[0].Text(), "found it") {
+		t.Errorf("messages = %+v, want the report as the prompt", m.messages)
+	}
+	if last := m.entries[len(m.entries)-1]; last.kind != entryNotice || !strings.Contains(last.text, "reported back") {
+		t.Errorf("want a notice on the transcript, got %+v", last)
+	}
+}
+
+func TestABackgroundReportWaitsForTheBoundaryMidTurn(t *testing.T) {
+	m := newTestModel(t, 80, 24)
+	m.streaming = true
+	m.startTask(taskStartMsg{info: agent.TaskInfo{ID: "bg2", Description: "dig", Background: true}})
+	m.agent.Steer(llm.UserText("report"))
+
+	m.Update(taskDoneMsg{id: "bg2"})
+
+	if m.steered != 1 {
+		t.Errorf("steered = %d, want the report counted as waiting", m.steered)
+	}
+	if left := m.agent.Steered(); len(left) != 1 {
+		t.Errorf("the report must stay with the agent for the boundary, got %+v", left)
+	}
+	if len(m.messages) != 0 {
+		t.Errorf("the conversation must not change under a running turn: %+v", m.messages)
+	}
+}

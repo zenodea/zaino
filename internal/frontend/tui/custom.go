@@ -20,6 +20,9 @@ func (m *Model) UseConfig(cfg *config.Config) {
 		return
 	}
 	m.cfg = cfg
+	for id, p := range cfg.Prices {
+		m.prices.Set(id, llm.Price{Input: p.Input, Output: p.Output, CacheRead: p.CacheRead, CacheWrite: p.CacheWrite})
+	}
 
 	built := commandList()
 	for _, c := range cfg.Commands {
@@ -91,10 +94,6 @@ func fromFile(c config.Command) command {
 // Sent the way a typed prompt is, except that the transcript can say what was
 // asked for rather than the whole of what went out.
 func (m *Model) send(display, prompt string) tea.Cmd {
-	if m.streaming {
-		m.notice("still answering — wait for this turn to finish")
-		return nil
-	}
 	prompt = strings.TrimSpace(prompt)
 	if prompt == "" {
 		m.notice("that command has nothing in it")
@@ -111,8 +110,16 @@ func (m *Model) send(display, prompt string) tea.Cmd {
 	for _, what := range attached {
 		shown += "\n" + attachedStyle.Render("⧉ "+what)
 	}
-
 	m.push(entry{kind: entryUser, text: shown})
+
+	// Said while the model is still working: it goes in with the next tool
+	// results rather than waiting for the whole turn, so you can redirect a
+	// turn without stopping it.
+	if m.streaming {
+		m.agent.Steer(llm.Message{Role: llm.RoleUser, Content: content})
+		m.steered++
+		return nil
+	}
 	m.messages = append(m.messages, llm.Message{Role: llm.RoleUser, Content: content})
 	return m.launch()
 }

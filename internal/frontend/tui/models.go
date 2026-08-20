@@ -48,6 +48,9 @@ func (m *Model) receiveModels(msg modelsMsg) tea.Cmd {
 		m.fetched = map[string][]string{}
 	}
 	m.fetched[msg.provider] = msg.models
+	if lister, ok := m.agent.Provider.(llm.PriceLister); ok && msg.provider == m.provider {
+		m.prices.Merge(lister.Prices())
+	}
 
 	// Only take over the screen if the user is still waiting on this list.
 	if m.awaitingModels && msg.provider == m.provider {

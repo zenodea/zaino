@@ -1,10 +1,12 @@
 package tool
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os/exec"
 	"strings"
 	"time"
@@ -57,6 +59,13 @@ func (b *Bash) Prepare(input json.RawMessage) (Call, error) {
 	return &bashCall{dir: b.w.Root, command: command, timeout: timeout}, nil
 }
 
+type reporter func(string)
+
+func (r reporter) Write(p []byte) (int, error) {
+	r(string(p))
+	return len(p), nil
+}
+
 type bashCall struct {
 	dir     string
 	command string
@@ -78,8 +87,18 @@ func (c *bashCall) Run(ctx context.Context) (string, error) {
 
 	cmd := exec.CommandContext(ctx, "sh", "-c", c.command)
 	cmd.Dir = c.dir
-	out, err := cmd.CombinedOutput()
-	text := clipOutput(strings.TrimRight(string(out), "\n"))
+
+	// One writer for both streams, so exec gives them one pipe and the
+	// interleaving is the terminal's; the listener, if any, sees each chunk
+	// as it lands rather than everything at the end.
+	var out bytes.Buffer
+	var sink io.Writer = &out
+	if report := Progress(ctx); report != nil {
+		sink = io.MultiWriter(&out, reporter(report))
+	}
+	cmd.Stdout, cmd.Stderr = sink, sink
+	err := cmd.Run()
+	text := clipOutput(strings.TrimRight(out.String(), "\n"))
 
 	if ctx.Err() == context.DeadlineExceeded {
 		return "", fmt.Errorf("timed out after %s\n%s", c.timeout, text)

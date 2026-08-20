@@ -789,6 +789,26 @@ func limitBody(m *Model, limit int) []string {
 		hintStyle.Render("The turn is held before it is sent, and ⏎ sends it anyway."))
 }
 
+// What this run has cost, and what it could not count: the figure is only as
+// honest as the list of models it leaves out.
+func (m *Model) costLines() []string {
+	lines := []string{pad(hintStyle.Render("cost"), 12) + " " + bodyStyle.Render(dollars(m.sessionCost)) +
+		metaStyle.Render(" this run")}
+	if len(m.unpricedOn) == 0 {
+		return lines
+	}
+	models := make([]string, 0, len(m.unpricedOn))
+	for id := range m.unpricedOn {
+		models = append(models, id)
+	}
+	sort.Strings(models)
+	u := m.unpriced
+	lines = append(lines, hintStyle.Render(pad("", 13)+fmt.Sprintf("not counting %s↑ %s↓ on %s",
+		humanTokens(u.InputTokens), humanTokens(u.OutputTokens+u.ThinkingTokens), strings.Join(models, ", "))),
+		hintStyle.Render(pad("", 13)+"— name them under \"prices\" in your config"))
+	return lines
+}
+
 func cmdUsage(m *Model, _ string) tea.Cmd {
 	u := m.sessionUsage
 	width := min(max(m.contentWidth()-34, 12), 40)
@@ -818,6 +838,7 @@ func cmdUsage(m *Model, _ string) tea.Cmd {
 		lines = append(lines, bar("cache write", u.CacheWriteTokens, biggest, width, meterHeat[3]))
 	}
 
+	lines = append(append(lines, ""), m.costLines()...)
 	lines = append(lines, "", hintStyle.Render(fmt.Sprintf("%d messages · %s · %s",
 		len(m.messages), m.modelName(), orDefault(m.sessionID(), "not saved"))))
 	return m.show("usage · "+m.provider, lines)

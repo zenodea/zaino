@@ -123,8 +123,11 @@ func (e entry) renderAs(width int, bars map[int]string) string {
 	default:
 		wrapped = e.bodyStyle().Width(bodyWidth).Render(text)
 	}
-	if e.kind == entryTool && e.expanded {
+	switch {
+	case e.kind == entryTool && e.expanded:
 		wrapped += "\n" + e.detail(bodyWidth)
+	case e.kind == entryTool && !e.done && e.toolResult != "":
+		wrapped += "\n" + e.liveTail(bodyWidth)
 	}
 
 	rest := strings.Repeat(" ", max(gutterWidth-lipgloss.Width(marker)-1, 0))
@@ -154,7 +157,10 @@ func (e entry) detail(width int) string {
 	}
 	if result := e.toolResult; strings.TrimSpace(result) != "" {
 		label, style := "result", toolStyle
-		if e.failed {
+		switch {
+		case !e.done:
+			label = "output so far"
+		case e.failed:
 			label, style = "error", errorStyle
 		}
 		lines = append(lines, metaStyle.Render(label))
@@ -162,6 +168,21 @@ func (e entry) detail(width int) string {
 	}
 	if len(lines) == 0 {
 		lines = append(lines, metaStyle.Render("(nothing to show)"))
+	}
+	return strings.Join(lines, "\n")
+}
+
+const tailLines = 3
+
+// The last few lines of a command still running, so a long test run or build
+// is seen to be getting somewhere rather than merely taking a while.
+func (e entry) liveTail(width int) string {
+	lines := strings.Split(strings.TrimRight(e.toolResult, "\n"), "\n")
+	if len(lines) > tailLines {
+		lines = lines[len(lines)-tailLines:]
+	}
+	for i, line := range lines {
+		lines[i] = metaStyle.Render(clamp(strings.TrimRight(line, " "), width))
 	}
 	return strings.Join(lines, "\n")
 }
@@ -215,6 +236,8 @@ func (e entry) toolLine(width int) string {
 
 func (e entry) toolStatus() string {
 	switch {
+	case !e.done && e.toolResult != "":
+		return humanBytes(len(e.toolResult)) + " …"
 	case !e.done:
 		return "…"
 	case e.failed:

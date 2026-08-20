@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/zenodea/zaino/internal/permission"
@@ -634,5 +635,39 @@ func TestBatchAsksOnceWithOneDiff(t *testing.T) {
 	req := call.Request()
 	if !strings.Contains(req.Preview, "ONE") || !strings.Contains(req.Preview, "THREE") {
 		t.Errorf("preview shows only part of the batch:\n%s", req.Preview)
+	}
+}
+
+func TestBashStreamsOutputToWhoeverListens(t *testing.T) {
+	w := workspace(t)
+	call, err := prepare(t, &Bash{w}, bashArgs{Command: "echo one; sleep 0.05; echo two; echo three >&2"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var mu sync.Mutex
+	var chunks []string
+	ctx := WithProgress(context.Background(), func(chunk string) {
+		mu.Lock()
+		defer mu.Unlock()
+		chunks = append(chunks, chunk)
+	})
+
+	out, err := call.Run(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if len(chunks) < 2 {
+		t.Errorf("got %d chunks, want output to arrive as it happens: %q", len(chunks), chunks)
+	}
+	if joined := strings.Join(chunks, ""); strings.TrimRight(joined, "\n") != out {
+		t.Errorf("streamed %q but returned %q", joined, out)
+	}
+	for _, want := range []string{"one", "two", "three"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("output %q is missing %q", out, want)
+		}
 	}
 }
