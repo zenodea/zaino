@@ -8,6 +8,7 @@ import (
 
 	"github.com/zenodea/zaino/internal/agent"
 	"github.com/zenodea/zaino/internal/llm"
+	"github.com/zenodea/zaino/internal/store/session"
 )
 
 func cmdRewind(m *Model, arg string) tea.Cmd {
@@ -17,50 +18,29 @@ func cmdRewind(m *Model, arg string) tea.Cmd {
 		return nil
 	}
 
-	if arg != "" {
-		for _, t := range turns {
-			if strings.HasPrefix(strings.ToLower(t.Prompt), strings.ToLower(arg)) {
-				return m.rewind(t)
-			}
+	// One step back is the common case, so that is what the bare command
+	// does; a prefix names a turn further up, and /journey shows them all.
+	if arg == "" {
+		return m.rewind(turns[len(turns)-1])
+	}
+	for _, t := range turns {
+		if strings.HasPrefix(strings.ToLower(t.Prompt), strings.ToLower(arg)) {
+			return m.rewind(t)
 		}
-		m.push(entry{kind: entryError, text: fmt.Sprintf("no prompt of yours starts with %q", arg)})
+	}
+	m.push(entry{kind: entryError, text: fmt.Sprintf("no prompt of yours starts with %q", arg)})
+	return nil
+}
+
+// rewind is a journey of one step: with a session on disk it travels the
+// same way /journey does, so the model and the rest of the settings come
+// back to what they were then; without one it can only trim the messages.
+func (m *Model) rewind(t agent.Turn) tea.Cmd {
+	if stop, ok := m.stopFor(t); ok {
+		m.takeUp(stop, "rewound")
 		return nil
 	}
 
-	// Newest first: going back one turn is the common case, and the further
-	// back you mean the longer you are willing to look for it.
-	options := make([]choice, 0, len(turns))
-	for i := len(turns) - 1; i >= 0; i-- {
-		t := turns[i]
-		dropped := len(m.messages) - t.At
-		options = append(options, choice{
-			label:  truncate(firstLine(t.Prompt), 40),
-			value:  fmt.Sprint(t.At),
-			detail: fmt.Sprintf("%d messages leave the context", dropped),
-			body: []string{
-				bodyStyle.Render(truncate(firstLine(t.Prompt), 60)),
-				"",
-				keyed("dropped", fmt.Sprintf("%d messages stop being sent", dropped)),
-				"",
-				hintStyle.Render("The prompt comes back to the composer to be changed and asked again."),
-				hintStyle.Render("What came after stays in the session file, on a branch of its own."),
-			},
-		})
-	}
-
-	return m.ask(chooser{title: "rewind · take the conversation up from an earlier turn",
-		options: options,
-		apply: func(m *Model, picked choice) {
-			for _, t := range agent.Turns(m.messages) {
-				if fmt.Sprint(t.At) == picked.value {
-					m.runCmd(m.rewind(t))
-					return
-				}
-			}
-		}})
-}
-
-func (m *Model) rewind(t agent.Turn) tea.Cmd {
 	if err := m.rec.Rewind(t.At); err != nil {
 		m.push(entry{kind: entryError, text: err.Error()})
 		return nil
@@ -74,6 +54,28 @@ func (m *Model) rewind(t agent.Turn) tea.Cmd {
 	m.push(entry{kind: entryNotice, text: fmt.Sprintf(
 		"rewound · %d messages left the context, and the prompt is back in the composer", dropped)})
 	return nil
+}
+
+// The stop on the map that a turn in the context is.
+func (m *Model) stopFor(t agent.Turn) (journeyStop, bool) {
+	store := m.rec.Store()
+	if store == nil {
+		return journeyStop{}, false
+	}
+	entries, err := store.Entries()
+	if err != nil {
+		return journeyStop{}, false
+	}
+	marks := session.Build(entries).Marks
+	if t.At >= len(marks) || marks[t.At] == "" {
+		return journeyStop{}, false
+	}
+	for _, e := range entries {
+		if e.ID == marks[t.At] {
+			return journeyStop{id: e.ID, parent: e.Parent, prompt: t.Prompt, at: e.At}, true
+		}
+	}
+	return journeyStop{}, false
 }
 
 func firstLine(s string) string {

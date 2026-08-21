@@ -4,6 +4,8 @@ import (
 	"strings"
 	"testing"
 
+	tea "github.com/charmbracelet/bubbletea"
+
 	"github.com/zenodea/zaino/internal/agent"
 	"github.com/zenodea/zaino/internal/llm"
 	"github.com/zenodea/zaino/internal/store/session"
@@ -151,4 +153,47 @@ func storedEntries(t *testing.T, repo session.Repo, id string) []session.Entry {
 		t.Fatalf("Entries: %v", err)
 	}
 	return entries
+}
+
+func TestTheTurnLimitHoldsAndCarriesOn(t *testing.T) {
+	m := newTestModel(t, 80, 24)
+	m.agent.MaxTurns = 4
+	m.streaming = true
+	history := []llm.Message{llm.UserText("go"),
+		{Role: llm.RoleAssistant, Content: llm.Content{llm.ToolUseBlock{ID: "t1", Name: "read"}}},
+		{Role: llm.RoleUser, Content: llm.Content{llm.ToolResultBlock{ToolUseID: "t1", Content: "x"}}}}
+
+	m.Update(doneMsg{Messages: history, Err: agent.ErrMaxTurns})
+
+	if m.streaming {
+		t.Fatal("the turn should be held, not running")
+	}
+	if !m.limit.open || !m.limit.turns || m.limit.limit != 4 {
+		t.Fatalf("limit gate = %+v, want the turn limit held at 4", m.limit)
+	}
+	if view := stripANSI(m.View()); !strings.Contains(view, "turn limit") || !strings.Contains(view, "carry on") {
+		t.Errorf("the panel should say what happened and offer to carry on:\n%s", view)
+	}
+
+	m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if !m.streaming || m.limit.open {
+		t.Error("⏎ should let it carry on")
+	}
+	if len(m.messages) != 3 {
+		t.Errorf("messages = %d, want the history kept whole", len(m.messages))
+	}
+}
+
+func TestLeavingTheTurnLimitKeepsTheHistory(t *testing.T) {
+	m := newTestModel(t, 80, 24)
+	m.streaming = true
+	m.Update(doneMsg{Messages: []llm.Message{llm.UserText("go")}, Err: agent.ErrMaxTurns})
+	m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+
+	if m.limit.open || m.streaming {
+		t.Error("esc should leave the turn where it is")
+	}
+	if last := m.entries[len(m.entries)-1]; !strings.Contains(last.text, "left there") {
+		t.Errorf("entry = %+v", last)
+	}
 }

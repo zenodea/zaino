@@ -3,6 +3,8 @@ package tui
 import (
 	"context"
 	"fmt"
+	"github.com/zenodea/zaino/internal/agent"
+	"github.com/zenodea/zaino/internal/llm"
 	"sort"
 	"strings"
 	"testing"
@@ -269,5 +271,79 @@ func TestEscLeavesTheSheetNotTheQuestion(t *testing.T) {
 	}
 	if m.pending == nil {
 		t.Error("esc from the sheet must not refuse the question")
+	}
+}
+
+// A child asking while the agents board is up used to ask into the void: the
+// keys went to the question, the board showed nothing of it, and the child
+// sat blocked — which from the chair looks like everything freezing.
+func TestAQuestionShowsOverTheAgentsBoard(t *testing.T) {
+	m := newTestModel(t, 100, 30)
+	m.streaming = true
+	m.Update(toolCallMsg{Call: llm.ToolUseBlock{ID: "t0", Name: "task", Input: []byte(`{}`)}})
+	m.Update(taskStartMsg{info: agent.TaskInfo{ID: "t0", Description: "research", Depth: 1}})
+	m.runCommand("/agents")
+
+	reply := make(chan permission.Grant, 1)
+	m.Update(askMsg{req: editRequest(), reply: reply})
+
+	view := stripANSI(m.View())
+	for _, want := range []string{"agents · 1 of 1", "Write", "main.go", "y allow"} {
+		if !strings.Contains(view, want) {
+			t.Errorf("the board with a question on it is missing %q:\n%s", want, view)
+		}
+	}
+
+	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'y'}})
+	if got := <-reply; got != permission.Once {
+		t.Errorf("grant = %v, want the question answered from the board", got)
+	}
+	if !m.agents.open {
+		t.Error("answering should leave the board where it was")
+	}
+	if strings.Contains(stripANSI(m.View()), "y allow") {
+		t.Error("the question should be gone once answered")
+	}
+}
+
+func TestAQuestionShowsOverEveryScreen(t *testing.T) {
+	screens := map[string]func() *Model{
+		"sheet": func() *Model {
+			m := newTestModel(t, 100, 30)
+			m.runCommand("/help")
+			return m
+		},
+		"journey": func() *Model {
+			m := newBranchedModel(t)
+			m.resize(100, 30)
+			m.runCommand("/journey")
+			return m
+		},
+		"picker": func() *Model {
+			m := newBranchedModel(t)
+			m.resize(100, 30)
+			m.runCommand("/sessions")
+			return m
+		},
+	}
+	for name, show := range screens {
+		m := show()
+		if !(m.sheet.open || m.journey.open || m.picker.open) {
+			t.Fatalf("%s did not open", name)
+		}
+		m.Update(askMsg{req: editRequest(), reply: make(chan permission.Grant, 1)})
+		if view := stripANSI(m.View()); !strings.Contains(view, "y allow") {
+			t.Errorf("%s: the question is not on screen:\n%s", name, view)
+		}
+	}
+}
+
+func TestAQuestionOutranksTheLimitPanel(t *testing.T) {
+	m := newTestModel(t, 100, 30)
+	m.holdAtTurns()
+	m.Update(askMsg{req: editRequest(), reply: make(chan permission.Grant, 1)})
+	view := stripANSI(m.View())
+	if !strings.Contains(view, "y allow") || strings.Contains(view, "turn limit") {
+		t.Errorf("want the question shown and the held turn waiting behind it:\n%s", view)
 	}
 }

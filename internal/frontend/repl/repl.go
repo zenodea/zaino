@@ -28,6 +28,12 @@ type Options struct {
 	ShowThinking bool
 	Verbose      bool
 
+	// Prompt asks once and leaves: the answer goes to stdout and the process
+	// exits with the turn. JSON makes that one object rather than streamed
+	// text, for whatever is on the other end of the pipe.
+	Prompt string
+	JSON   bool
+
 	Interactive bool
 	Gate        *permission.Gate
 
@@ -41,8 +47,13 @@ func Run(ag *agent.Agent, o Options) error {
 	stdout := bufio.NewWriter(os.Stdout)
 	defer stdout.Flush()
 
+	var streamed bool
 	ag.Hooks = agent.Hooks{
 		OnTextDelta: func(text string) {
+			if o.JSON {
+				return
+			}
+			streamed = true
 			stdout.WriteString(text)
 			stdout.Flush()
 		},
@@ -175,6 +186,30 @@ func Run(ag *agent.Agent, o Options) error {
 		o.Gate.Approver = &approver{in: in, rec: o.Recorder}
 	}
 
+	if o.Prompt != "" {
+		messages, err := runTurn(ag, interrupts, messages, o.Prompt, stdout, o.Recorder, nil)
+		if !o.JSON {
+			// A provider that answered whole rather than streaming still
+			// owes the pipe its answer, and the pipe is owed a last newline.
+			if answer := lastAnswer(messages); !streamed && answer != "" {
+				stdout.WriteString(answer)
+			}
+			stdout.WriteString("\n")
+			stdout.Flush()
+			return err
+		}
+		stdout.Flush()
+		return writeReport(os.Stdout, report{
+			Answer:   lastAnswer(messages),
+			Provider: o.Provider,
+			Model:    ag.Model,
+			Usage:    usage,
+			Cost:     cost,
+			Session:  o.Recorder.ID(),
+			Error:    errString(err),
+		})
+	}
+
 	for {
 		fmt.Fprintf(os.Stderr, "\x1b[1m› \x1b[0m")
 		line, err := in.ReadString('\n')
@@ -185,8 +220,8 @@ func Run(ag *agent.Agent, o Options) error {
 			}
 
 			defer fmt.Fprintln(os.Stderr)
-			messages = runTurn(ag, interrupts, messages, strings.TrimSpace(line), stdout, o.Recorder, nil)
-			return nil
+			_, err := runTurn(ag, interrupts, messages, strings.TrimSpace(line), stdout, o.Recorder, nil)
+			return err
 		}
 		if err != nil {
 			return err
@@ -213,16 +248,18 @@ func Run(ag *agent.Agent, o Options) error {
 		if !o.Interactive {
 			asker = nil
 		}
-		messages = runTurn(ag, interrupts, messages, prompt, stdout, o.Recorder, asker)
+		messages, _ = runTurn(ag, interrupts, messages, prompt, stdout, o.Recorder, asker)
 	}
 }
 
+// runTurn asks, and keeps asking while the answer is a reason to, and hands
+// back the conversation as it stands with whatever stopped it.
 func runTurn(ag *agent.Agent, interrupts *interrupts, messages []llm.Message,
-	prompt string, stdout *bufio.Writer, rec *session.Recorder, in *bufio.Reader) []llm.Message {
+	prompt string, stdout *bufio.Writer, rec *session.Recorder, in *bufio.Reader) ([]llm.Message, error) {
 	content, attached, err := attach.Prompt(workdir(), prompt)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "\x1b[31m"+err.Error()+"\x1b[0m")
-		return messages
+		return messages, err
 	}
 	for _, what := range attached {
 		fmt.Fprintf(os.Stderr, "\x1b[2m⧉ %s\x1b[0m\n", what)
@@ -257,17 +294,84 @@ func runTurn(ag *agent.Agent, interrupts *interrupts, messages []llm.Message,
 		case err == nil:
 		case errors.As(err, &overLimit):
 			if !askPastLimit(overLimit, in) {
-				return messages
+				return messages, err
 			}
 			ag.AllowOnce()
 			continue
+		case errors.Is(err, agent.ErrMaxTurns):
+			if askToCarryOn(ag, in) {
+				continue
+			}
 		case errors.Is(err, context.Canceled):
 			fmt.Fprintln(os.Stderr, "\x1b[2minterrupted\x1b[0m")
 		default:
 			fmt.Fprintln(os.Stderr, "\x1b[31m"+err.Error()+"\x1b[0m")
 		}
-		return messages
+		return messages, err
 	}
+}
+
+// What a one-shot run comes to, for the program on the other end.
+type report struct {
+	Answer   string    `json:"answer"`
+	Provider string    `json:"provider"`
+	Model    string    `json:"model"`
+	Usage    llm.Usage `json:"usage"`
+	Cost     float64   `json:"cost"`
+	Session  string    `json:"session,omitempty"`
+	Error    string    `json:"error,omitempty"`
+}
+
+func writeReport(w io.Writer, r report) error {
+	enc := json.NewEncoder(w)
+	enc.SetIndent("", "  ")
+	if err := enc.Encode(r); err != nil {
+		return err
+	}
+	if r.Error != "" {
+		return errors.New(r.Error)
+	}
+	return nil
+}
+
+func lastAnswer(messages []llm.Message) string {
+	for i := len(messages) - 1; i >= 0; i-- {
+		if messages[i].Role == llm.RoleAssistant {
+			if text := strings.TrimSpace(messages[i].Text()); text != "" {
+				return text
+			}
+		}
+	}
+	return ""
+}
+
+func errString(err error) string {
+	if err == nil {
+		return ""
+	}
+	return err.Error()
+}
+
+// The turn ran to its limit of tool rounds with the model still working.
+// Nothing is lost; the question is whether to give it another run.
+func askToCarryOn(ag *agent.Agent, in *bufio.Reader) bool {
+	limit := ag.MaxTurns
+	if limit <= 0 {
+		limit = agent.DefaultMaxTurns
+	}
+	fmt.Fprintf(os.Stderr, "\x1b[31m⚠ turn limit · %d rounds of tool calls without finishing\x1b[0m\n", limit)
+	if in == nil {
+		fmt.Fprintln(os.Stderr, "\x1b[2mleft there\x1b[0m")
+		return false
+	}
+
+	fmt.Fprintf(os.Stderr, "\x1b[2m⏎ let it carry on · anything else leaves it here\x1b[0m\n\x1b[1m› \x1b[0m")
+	line, readErr := in.ReadString('\n')
+	if readErr != nil || strings.TrimSpace(line) != "" {
+		fmt.Fprintln(os.Stderr, "\x1b[2mleft there · ask again to pick it up\x1b[0m")
+		return false
+	}
+	return true
 }
 
 // Nothing was sent, so the conversation is still whole either way; the only

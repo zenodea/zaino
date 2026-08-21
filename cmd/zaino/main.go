@@ -4,6 +4,7 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"strings"
@@ -44,6 +45,8 @@ func run() error {
 		showThink = flag.Bool("thinking", false, "request and display model reasoning")
 		plain     = flag.Bool("plain", false, "line-based REPL instead of the full-screen UI")
 		verbose   = flag.Bool("v", false, "print per-turn token usage (implies -plain)")
+		prompt    = flag.String("p", "", "ask this once, print the answer and exit; piped stdin is appended")
+		jsonOut   = flag.Bool("json", false, "with -p, print the answer, usage and cost as one JSON object")
 
 		permMode = flag.String("permission", string(permission.Manual),
 			"when tools stop to ask: "+strings.Join(permission.ModeNames(), "|"))
@@ -207,12 +210,26 @@ func run() error {
 		fmt.Fprintln(os.Stderr, "zaino: session not being saved:", err)
 	}
 
-	if *plain || *verbose || !isTerminal(os.Stdin) {
+	if *prompt != "" || *plain || *verbose || !isTerminal(os.Stdin) {
+		once := *prompt
+		if once != "" && !isTerminal(os.Stdin) {
+			// cat notes.md | zaino -p "summarise this": the pipe is the rest
+			// of the question.
+			piped, err := io.ReadAll(os.Stdin)
+			if err != nil {
+				return err
+			}
+			if rest := strings.TrimSpace(string(piped)); rest != "" {
+				once += "\n\n" + rest
+			}
+		}
 		return repl.Run(ag, repl.Options{
 			Provider:     backend.Name(),
 			Config:       cfg,
 			ShowThinking: *showThink,
 			Verbose:      *verbose,
+			Prompt:       once,
+			JSON:         *jsonOut,
 			Interactive:  isTerminal(os.Stdin),
 			Gate:         gate,
 			Repo:         repo,

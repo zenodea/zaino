@@ -415,7 +415,12 @@ func exchangeTip(entries []session.Entry, stop string, onPath map[string]bool) s
 // diverge takes the conversation up again from any stop on the map: the
 // context becomes everything that led there, and the prompt comes back to
 // the composer to be changed and asked again. Rewind, but across roads.
-func (m *Model) diverge(stop journeyStop) {
+func (m *Model) diverge(stop journeyStop) { m.takeUp(stop, "branched") }
+
+// takeUp is the one way back: the context, the model and the rest of the
+// settings become what they were on the road to the stop, whether that road
+// is the one you are on or one left behind.
+func (m *Model) takeUp(stop journeyStop, did string) {
 	store := m.rec.Store()
 	if store == nil {
 		return
@@ -435,7 +440,7 @@ func (m *Model) diverge(stop journeyStop) {
 	m.applyContext(ctx)
 	m.showRecalled(stop.prompt)
 	m.push(entry{kind: entryNotice, text: fmt.Sprintf(
-		"branched · %d messages lead here, and the prompt is back in the composer", len(ctx.Messages))})
+		"%s · %d messages lead here, and the prompt is back in the composer", did, len(ctx.Messages))})
 }
 
 // Two lines of heading, three of signpost.

@@ -341,6 +341,34 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 // overlay floats a panel over the last lines of a block. Anything that opens
 // while you type belongs on top of the transcript, not wedged into it.
+// A question finds you wherever you are. The keys already go to it ahead of
+// every board; this makes sure it is on the screen they are being pressed at,
+// floated over the bottom of whatever was there.
+func (m *Model) askOver(screen string) string {
+	ask := m.askView()
+	if ask == "" {
+		return screen
+	}
+	panel := lipgloss.NewStyle().PaddingLeft(1).Render(ask)
+
+	// A board that stacks up from the bottom leaves its top empty; the
+	// question goes there rather than over the rows it would otherwise hide.
+	lines := strings.Split(screen, "\n")
+	height := strings.Count(panel, "\n") + 1
+	blank := 0
+	for _, line := range lines[min(2, len(lines)):] {
+		if strings.TrimSpace(line) != "" {
+			break
+		}
+		blank++
+	}
+	if blank >= height && len(lines) > 2+height {
+		copy(lines[2:2+height], strings.Split(panel, "\n"))
+		return strings.Join(lines, "\n")
+	}
+	return overlay(screen, panel)
+}
+
 func overlay(base, panel string) string {
 	if panel == "" {
 		return base
@@ -675,6 +703,8 @@ func (m *Model) finishTurn(msg doneMsg) {
 	case msg.Err == nil:
 	case errors.As(msg.Err, &overLimit):
 		m.holdAtLimit(overLimit)
+	case errors.Is(msg.Err, agent.ErrMaxTurns):
+		m.holdAtTurns()
 	case errors.Is(msg.Err, context.Canceled):
 		m.push(entry{kind: entryNotice, text: "interrupted"})
 	case errors.Is(msg.Err, agent.ErrTruncated):
@@ -951,62 +981,62 @@ func (m *Model) View() string {
 	pad := lipgloss.NewStyle().PaddingLeft(1)
 
 	if m.secret.open {
-		return strings.Join([]string{
+		return m.askOver(strings.Join([]string{
 			pad.Render(m.header()),
 			"",
 			m.secretView(),
-		}, "\n")
+		}, "\n"))
 	}
 
 	if m.picker.open {
-		return strings.Join([]string{
+		return m.askOver(strings.Join([]string{
 			pad.Render(m.header()),
 			"",
 			pad.Render(m.pickerView()),
 			pad.Render(rule(m.contentWidth())),
 			pad.Render(m.pickerFooter()),
-		}, "\n")
+		}, "\n"))
 	}
 
 	if m.journey.open {
-		return strings.Join([]string{
+		return m.askOver(strings.Join([]string{
 			pad.Render(m.header()),
 			"",
 			pad.Render(m.journeyView()),
 			pad.Render(rule(m.contentWidth())),
 			pad.Render(m.journeyFooter()),
-		}, "\n")
+		}, "\n"))
 	}
 
 	if m.agents.open {
-		return strings.Join([]string{
+		return m.askOver(strings.Join([]string{
 			pad.Render(m.header()),
 			"",
 			pad.Render(m.agentsView()),
 			pad.Render(rule(m.contentWidth())),
 			pad.Render(m.agentsFooter()),
-		}, "\n")
+		}, "\n"))
 	}
 
 	if m.sheet.open {
-		return strings.Join([]string{
+		return m.askOver(strings.Join([]string{
 			pad.Render(m.header()),
 			"",
 			m.sheetView(),
 			pad.Render(rule(m.contentWidth())),
 			pad.Render(m.sheetFooter()),
-		}, "\n")
+		}, "\n"))
 	}
 
 	// A board is a screen of its own, for the same reason the picker is.
 	if m.onBoard() {
-		return strings.Join([]string{
+		return m.askOver(strings.Join([]string{
 			pad.Render(m.header()),
 			"",
 			m.boardView(),
 			pad.Render(rule(m.contentWidth())),
 			pad.Render(hintStyle.Render("j/k or ↑↓ choose · ⏎ set · esc cancel")),
-		}, "\n")
+		}, "\n"))
 	}
 
 	// The blank under the transcript is always there: the last thing said never
@@ -1014,12 +1044,14 @@ func (m *Model) View() string {
 	// it comes down onto the rule as before.
 	ground := pad.Render(m.viewport.View()) + "\n"
 
+	// A question outranks everything else under the transcript: whoever
+	// asked is stopped until it is answered.
 	var below []string
 	switch {
-	case m.limitView() != "":
-		below = []string{pad.Render(m.limitView())}
 	case m.askView() != "":
 		below = []string{pad.Render(m.askView())}
+	case m.limitView() != "":
+		below = []string{pad.Render(m.limitView())}
 	case m.chooserView() != "":
 		below = []string{pad.Render(m.chooserView())}
 	case m.menuView() != "":

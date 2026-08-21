@@ -1,0 +1,29 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="212 86 336 404" width="168" height="202" role="img" aria-labelledby="t">
+  <title id="t">Zaino: a backpack</title>
+  <g fill="none" stroke="#2f5d40" stroke-linecap="round">
+    <path d="M300 200 C 250 250 245 360 275 430" stroke-width="26"/>
+    <path d="M460 200 C 510 250 515 360 485 430" stroke-width="26"/>
+    <path d="M352 132 Q 380 96 408 132" stroke-width="12"/>
+  </g>
+  <g stroke="#23201a" stroke-width="3.5">
+    <rect x="262" y="150" width="236" height="330" rx="48" fill="#c4522a"/>
+    <path d="M262 400 h236 v32 a48 48 0 0 1 -48 48 h-140 a48 48 0 0 1 -48 -48 z" fill="#a03f1d"/>
+    <path d="M262 300 h-26 a14 14 0 0 0 -14 14 v56 a14 14 0 0 0 14 14 h26 z" fill="#a03f1d"/>
+    <path d="M498 300 h26 a14 14 0 0 1 14 14 v56 a14 14 0 0 1 -14 14 h-26 z" fill="#a03f1d"/>
+    <rect x="254" y="128" width="252" height="108" rx="42" fill="#a03f1d"/>
+  </g>
+  <path d="M254 214 q126 26 252 0 v-14 a42 42 0 0 1 -42 36 h-168 a42 42 0 0 1 -42 -36 z" fill="rgba(0,0,0,.14)"/>
+  <g stroke="#23201a" stroke-width="3">
+    <rect x="362" y="196" width="36" height="86" rx="8" fill="#2f5d40"/>
+    <rect x="352" y="222" width="56" height="34" rx="9" fill="#e0a32c"/>
+    <rect x="248" y="262" width="30" height="14" rx="7" fill="#2f5d40"/>
+    <rect x="482" y="262" width="30" height="14" rx="7" fill="#2f5d40"/>
+  </g>
+  <rect x="364" y="233" width="32" height="12" rx="6" fill="#a03f1d"/>
+  <rect x="292" y="308" width="176" height="112" rx="28" fill="#e7dcc3" stroke="#23201a" stroke-width="3.5"/>
+  <path d="M304 322 h152" stroke="#23201a" stroke-width="3" stroke-dasharray="2 6" stroke-linecap="round"/>
+  <circle cx="456" cy="322" r="9" fill="#e0a32c" stroke="#23201a" stroke-width="3"/>
+  <path d="M456 331 v14" stroke="#23201a" stroke-width="3" stroke-linecap="round"/>
+  <circle cx="380" cy="372" r="27" fill="#e0a32c" stroke="#23201a" stroke-width="3.5"/>
+  <text x="380" y="382" text-anchor="middle" font-family="Georgia, 'Times New Roman', serif" font-weight="900" font-size="30" fill="#23201a">Z</text>
+</svg>

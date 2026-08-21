@@ -3,6 +3,8 @@ package repl
 import (
 	"context"
 	"encoding/json"
+	"io"
+	"os"
 	"strconv"
 	"strings"
 	"testing"
@@ -226,4 +228,55 @@ func (s *memStore) Close() error                      { return nil }
 func (s *memStore) SetLeaf(id string) error {
 	s.leaf = id
 	return nil
+}
+
+func TestAOneShotRunReportsAsJSON(t *testing.T) {
+	ag := newAgent()
+	ag.Provider = &summariser{}
+	ag.Model = "stub-1"
+
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	was := os.Stdout
+	os.Stdout = w
+	runErr := Run(ag, Options{Provider: "stub", Prompt: "what happened?", JSON: true,
+		Recorder: session.NewRecorder(nil)})
+	w.Close()
+	os.Stdout = was
+	if runErr != nil {
+		t.Fatalf("Run: %v", runErr)
+	}
+
+	out, _ := io.ReadAll(r)
+	var got report
+	if err := json.Unmarshal(out, &got); err != nil {
+		t.Fatalf("stdout is not one JSON object: %v\n%s", err, out)
+	}
+	if got.Answer != "what happened before" || got.Provider != "stub" || got.Model != "stub-1" || got.Error != "" {
+		t.Errorf("report = %+v", got)
+	}
+	if strings.Count(string(out), "what happened before") != 1 {
+		t.Errorf("the answer must not also be streamed as text:\n%s", out)
+	}
+}
+
+func TestAOneShotRunPrintsTheAnswer(t *testing.T) {
+	ag := newAgent()
+	ag.Provider = &summariser{}
+
+	r, w, _ := os.Pipe()
+	was := os.Stdout
+	os.Stdout = w
+	runErr := Run(ag, Options{Provider: "stub", Prompt: "what happened?", Recorder: session.NewRecorder(nil)})
+	w.Close()
+	os.Stdout = was
+	if runErr != nil {
+		t.Fatalf("Run: %v", runErr)
+	}
+	out, _ := io.ReadAll(r)
+	if !strings.Contains(string(out), "what happened before") {
+		t.Errorf("stdout = %q, want the answer", out)
+	}
 }
