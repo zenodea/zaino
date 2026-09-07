@@ -152,6 +152,14 @@ type editCall struct {
 	matches int
 	steps   int
 	how     string
+	change  *Change
+}
+
+func (c *editCall) Changes() []Change {
+	if c.change == nil {
+		return nil
+	}
+	return []Change{*c.change}
 }
 
 func (c *editCall) Request() permission.Request {
@@ -165,6 +173,9 @@ func (c *editCall) Request() permission.Request {
 }
 
 func (c *editCall) Run(context.Context) (string, error) {
+	if err := refuseGit(c.path); err != nil {
+		return "", err
+	}
 	unlock := c.w.Lock(c.path.Abs)
 	defer unlock()
 
@@ -187,6 +198,7 @@ func (c *editCall) Run(context.Context) (string, error) {
 		return "", err
 	}
 	c.w.MarkRead(c.path.Abs, []byte(c.after))
+	c.change = &Change{Path: c.path.String(), Existed: true, Before: []byte(c.before), After: []byte(c.after), Mode: info.Mode().Perm()}
 
 	out := fmt.Sprintf("Edited %s", c.path)
 	switch {

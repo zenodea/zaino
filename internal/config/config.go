@@ -40,6 +40,7 @@ type File struct {
 	Mouse         *bool              `json:"mouse,omitempty"`
 	Animate       *bool              `json:"animate,omitempty"`
 	Git           *bool              `json:"git,omitempty"`
+	Checkpoints   *bool              `json:"checkpoints,omitempty"`
 	Allow         []string           `json:"allow,omitempty"`
 	Deny          []string           `json:"deny,omitempty"`
 	Profile       string             `json:"profile,omitempty"`
@@ -211,6 +212,7 @@ func (f *File) merge(o File) {
 	setBool(&f.Mouse, o.Mouse)
 	setBool(&f.Animate, o.Animate)
 	setBool(&f.Git, o.Git)
+	setBool(&f.Checkpoints, o.Checkpoints)
 
 	if len(o.Tools) > 0 {
 		f.Tools = o.Tools

@@ -144,6 +144,12 @@ func commandList() []command {
 			run:     cmdLimit,
 		},
 		{
+			name:    "files",
+			summary: "what write and edit have changed along this conversation",
+			run:     cmdFiles,
+			live:    true,
+		},
+		{
 			name:    "hooks",
 			summary: "the commands your config runs around the loop",
 			run:     cmdHooks,
@@ -842,6 +848,52 @@ func (m *Model) costLines() []string {
 		humanTokens(u.InputTokens), humanTokens(u.OutputTokens+u.ThinkingTokens), strings.Join(models, ", "))),
 		hintStyle.Render(pad("", 13)+"— name them under \"prices\" in your config"))
 	return lines
+}
+
+func cmdFiles(m *Model, _ string) tea.Cmd {
+	store := m.rec.Store()
+	if store == nil {
+		m.notice("files: nothing is kept without a session on disk")
+		return nil
+	}
+	entries, err := store.Entries()
+	if err != nil {
+		m.push(entry{kind: entryError, text: err.Error()})
+		return nil
+	}
+	edits := map[string]int{}
+	created := map[string]bool{}
+	var order []string
+	for _, e := range session.Path(entries) {
+		for _, f := range e.Files {
+			if _, seen := edits[f.Path]; !seen {
+				order = append(order, f.Path)
+			}
+			edits[f.Path]++
+			if !f.Existed {
+				created[f.Path] = true
+			}
+		}
+	}
+	if len(order) == 0 {
+		m.notice("files: nothing written or edited yet")
+		return nil
+	}
+	lines := make([]string, 0, len(order)+2)
+	for _, path := range order {
+		what := fmt.Sprintf("edited %d×", edits[path])
+		if created[path] {
+			what = "created"
+			if edits[path] > 1 {
+				what += fmt.Sprintf(", then edited %d×", edits[path]-1)
+			}
+		}
+		lines = append(lines, keyed(path, what))
+	}
+	if m.blobs == nil {
+		lines = append(lines, "", hintStyle.Render("checkpoints are off, so /rewind leaves these as they are"))
+	}
+	return m.show("files", lines)
 }
 
 func cmdHooks(m *Model, _ string) tea.Cmd {

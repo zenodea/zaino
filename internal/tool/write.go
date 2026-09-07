@@ -67,6 +67,14 @@ type writeCall struct {
 	before   string
 	after    string
 	creating bool
+	change   *Change
+}
+
+func (c *writeCall) Changes() []Change {
+	if c.change == nil {
+		return nil
+	}
+	return []Change{*c.change}
 }
 
 func (c *writeCall) Request() permission.Request {
@@ -84,6 +92,9 @@ func (c *writeCall) Request() permission.Request {
 }
 
 func (c *writeCall) Run(context.Context) (string, error) {
+	if err := refuseGit(c.path); err != nil {
+		return "", err
+	}
 	unlock := c.w.Lock(c.path.Abs)
 	defer unlock()
 
@@ -112,6 +123,7 @@ func (c *writeCall) Run(context.Context) (string, error) {
 		return "", err
 	}
 	c.w.MarkRead(c.path.Abs, []byte(c.after))
+	c.change = &Change{Path: c.path.String(), Existed: !c.creating, Before: []byte(c.before), After: []byte(c.after), Mode: 0o644}
 
 	if c.creating {
 		return fmt.Sprintf("Created %s, %d lines", c.path, len(splitLines(c.after))), nil

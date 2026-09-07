@@ -55,6 +55,8 @@ type body struct {
 	Decision string `json:"decision,omitempty"`
 
 	Task *TaskBody `json:"task,omitempty"`
+
+	Files []FileChange `json:"files,omitempty"`
 }
 
 type New struct {
@@ -73,6 +75,10 @@ type Entry struct {
 
 func Message(m llm.Message, u *llm.Usage) New {
 	return New{Type: KindMessage, body: body{Message: &m, Usage: u}}
+}
+
+func MessageWith(m llm.Message, u *llm.Usage, files []FileChange) New {
+	return New{Type: KindMessage, body: body{Message: &m, Usage: u, Files: files}}
 }
 
 func Model(providerName, model string) New {

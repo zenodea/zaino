@@ -92,6 +92,7 @@ type Model struct {
 	rememberFailed bool
 	memory         *tool.Memory
 	todo           *tool.Todo
+	blobs          *session.Blobs
 
 	entries  []entry
 	rendered []string
@@ -675,6 +676,18 @@ func (m *Model) hooks(ctx context.Context) agent.Hooks {
 		},
 		OnSteer:      func(msgs []llm.Message) { emit(steerMsg(len(msgs))) },
 		OnHookFailed: func(err error) { emit(hookFailedMsg{err}) },
+		OnFileChange: m.noteChange(emit),
+	}
+}
+
+func (m *Model) noteChange(emit func(tea.Msg)) func(string, tool.Change) {
+	if m.blobs == nil {
+		return nil
+	}
+	return func(id string, c tool.Change) {
+		if err := m.rec.NoteChange(id, session.Change(c)); err != nil {
+			emit(hookFailedMsg{err})
+		}
 	}
 }
 

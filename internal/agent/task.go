@@ -198,6 +198,9 @@ func (c *taskCall) spawn(id string, cancel context.CancelFunc) (*Agent, TaskInfo
 	if on := c.parent.Hooks.OnTask; on != nil {
 		child.Hooks = on(info)
 	}
+	if child.Hooks.OnFileChange == nil {
+		child.Hooks.OnFileChange = c.parent.Hooks.OnFileChange
+	}
 
 	tools, err := c.agent.toolbox(c.parent.Tools)
 	if err != nil {

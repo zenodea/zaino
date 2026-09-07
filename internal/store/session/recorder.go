@@ -3,6 +3,7 @@ package session
 import (
 	"errors"
 	"strings"
+	"sync"
 
 	"github.com/zenodea/zaino/internal/llm"
 )
@@ -17,6 +18,42 @@ type Recorder struct {
 
 	written int
 	pending []llm.Usage
+
+	blobs   *Blobs
+	mu      sync.Mutex
+	changes map[string][]FileChange
+}
+
+func (r *Recorder) UseBlobs(b *Blobs) { r.blobs = b }
+
+func (r *Recorder) NoteChange(callID string, c Change) error {
+	if r == nil || r.blobs == nil {
+		return nil
+	}
+	fc, err := r.blobs.Keep(c)
+	if err != nil {
+		return err
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.changes == nil {
+		r.changes = map[string][]FileChange{}
+	}
+	r.changes[callID] = append(r.changes[callID], fc)
+	return nil
+}
+
+func (r *Recorder) take(msg llm.Message) []FileChange {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	var out []FileChange
+	for _, block := range msg.Content {
+		if result, ok := block.(llm.ToolResultBlock); ok {
+			out = append(out, r.changes[result.ToolUseID]...)
+			delete(r.changes, result.ToolUseID)
+		}
+	}
+	return out
 }
 
 func NewRecorder(store Store) *Recorder { return &Recorder{store: store} }
@@ -97,7 +134,7 @@ func (r *Recorder) Messages(messages []llm.Message) error {
 			r.pending = r.pending[1:]
 			usage = &u
 		}
-		if err := r.Append(Message(msg, usage)); err != nil && firstErr == nil {
+		if err := r.Append(MessageWith(msg, usage, r.take(msg))); err != nil && firstErr == nil {
 			firstErr = err
 		}
 	}

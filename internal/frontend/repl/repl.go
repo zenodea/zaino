@@ -21,6 +21,7 @@ import (
 	"github.com/zenodea/zaino/internal/store/last"
 	"github.com/zenodea/zaino/internal/store/session"
 	"github.com/zenodea/zaino/internal/store/wirelog"
+	"github.com/zenodea/zaino/internal/tool"
 )
 
 type Options struct {
@@ -45,6 +46,8 @@ type Options struct {
 
 	// Where the next zaino in this project starts from; nil forgets.
 	Remembered *last.Store
+
+	Blobs *session.Blobs
 }
 
 // record puts a setting picked at the prompt in the session and notes it
@@ -85,6 +88,14 @@ func Run(ag *agent.Agent, o Options) error {
 			fmt.Fprintf(os.Stderr, "\x1b[2m· %s → %s (%d bytes)\x1b[0m\n", call.Name, status, len(result))
 		},
 		OnHookFailed: func(err error) { fmt.Fprintln(os.Stderr, "\x1b[31m"+err.Error()+"\x1b[0m") },
+	}
+	if o.Blobs != nil {
+		o.Recorder.UseBlobs(o.Blobs)
+		ag.Hooks.OnFileChange = func(id string, c tool.Change) {
+			if err := o.Recorder.NoteChange(id, session.Change(c)); err != nil {
+				fmt.Fprintln(os.Stderr, "\x1b[31mchange not kept: "+err.Error()+"\x1b[0m")
+			}
+		}
 	}
 	if o.ShowThinking {
 		ag.Hooks.OnThinkingDelta = func(text string) {

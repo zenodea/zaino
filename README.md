@@ -114,6 +114,7 @@ Typing `/` opens a fuzzy menu. The ones that only look — `/usage`, `/agents`,
 /model /provider /effort /thinking /system /profile    the model-facing settings
 /permission /tools /vim /config                         how zaino behaves
 /rewind /journey /sessions /clear /compact /limit       the conversation and its tree
+/files                                                  what write and edit changed
 /agents /usage /help /quit
 ```
 

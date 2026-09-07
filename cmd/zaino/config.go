@@ -32,6 +32,7 @@ type knobs struct {
 	mouse         *bool
 	animate       *bool
 	git           *bool
+	checkpoints   *bool
 }
 
 func (k knobs) apply(c *config.Config, profile string, given map[string]bool) error {
@@ -73,6 +74,7 @@ func (k knobs) apply(c *config.Config, profile string, given map[string]bool) er
 	yes("mouse", k.mouse, c.Mouse)
 	yes("animate", k.animate, c.Animate)
 	yes("git", k.git, c.Git)
+	yes("checkpoints", k.checkpoints, c.Checkpoints)
 
 	// A profile is a deliberate pick, so it beats the plain keys around it —
 	// but still not a flag.

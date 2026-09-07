@@ -32,6 +32,8 @@ type Hooks struct {
 	OnSteer func(msgs []llm.Message)
 
 	OnHookFailed func(err error)
+
+	OnFileChange func(callID string, c tool.Change)
 }
 
 type Agent struct {
@@ -362,6 +364,7 @@ func (a *Agent) execute(ctx context.Context, call llm.ToolUseBlock, ready tool.C
 	}()
 
 	ctx = tool.WithCallID(ctx, call.ID)
+	ctx = tool.WithRootCallID(ctx, call.ID)
 	if on := a.Hooks.OnToolProgress; on != nil {
 		ctx = tool.WithProgress(ctx, func(chunk string) { on(call, chunk) })
 	}
@@ -369,6 +372,10 @@ func (a *Agent) execute(ctx context.Context, call llm.ToolUseBlock, ready tool.C
 	isErr := err != nil
 	if isErr {
 		out = "Error: " + err.Error()
+	} else if changed, ok := ready.(tool.Changed); ok && a.Hooks.OnFileChange != nil {
+		for _, c := range changed.Changes() {
+			a.Hooks.OnFileChange(tool.RootCallID(ctx), c)
+		}
 	}
 	out, isErr = a.afterTool(ctx, call, out, isErr)
 	return a.result(call, out, isErr)

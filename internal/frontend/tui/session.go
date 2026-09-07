@@ -18,6 +18,7 @@ func (m *Model) UseSession(repo session.Repo, rec *session.Recorder) {
 	m.repo = repo
 	if rec != nil {
 		m.rec = rec
+		m.rec.UseBlobs(m.blobs)
 	}
 }
 
@@ -30,6 +31,11 @@ func (m *Model) UsePrices(t *pricing.Table) { m.prices = t }
 func (m *Model) UseMemory(mem *tool.Memory) { m.memory = mem }
 
 func (m *Model) UseTodo(t *tool.Todo) { m.todo = t }
+
+func (m *Model) UseCheckpoints(b *session.Blobs) {
+	m.blobs = b
+	m.rec.UseBlobs(b)
+}
 
 func (m *Model) Restore(c session.Context) {
 	m.messages = c.Messages

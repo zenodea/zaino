@@ -71,9 +71,10 @@ func run() error {
 			"stop the session when the context passes this many tokens: 200k, 200000, off")
 		maxSpend = flag.Float64("max-spend", 0, "stop the session once it has cost this many dollars; 0 is no cap")
 
-		gitCtx  = flag.Bool("git", true, "put the branch, status and recent commits in the context")
-		vimKeys = flag.Bool("vim", true, "modal editing in the composer; -vim=false for plain input")
-		mouse   = flag.Bool("mouse", false,
+		gitCtx      = flag.Bool("git", true, "put the branch, status and recent commits in the context")
+		checkpoints = flag.Bool("checkpoints", true, "keep what write and edit change, so /rewind and /journey can put the files back")
+		vimKeys     = flag.Bool("vim", true, "modal editing in the composer; -vim=false for plain input")
+		mouse       = flag.Bool("mouse", false,
 			"scroll with the wheel, at the cost of selecting text with the mouse")
 		animate = flag.Bool("animate", true, "ease the transcript when ⌃j/⌃k move through it")
 
@@ -117,7 +118,7 @@ func run() error {
 		provider: providerName, model: model, maxTokens: maxTokens, effort: effort,
 		system: system, thinking: showThink, permission: permMode, allowOutside: allowOutside,
 		tools: toolNames, excludeTools: excludeTools, contextWindow: contextWindow,
-		maxContext: maxContext, maxSpend: maxSpend, vim: vimKeys, mouse: mouse, animate: animate, git: gitCtx,
+		maxContext: maxContext, maxSpend: maxSpend, checkpoints: checkpoints, vim: vimKeys, mouse: mouse, animate: animate, git: gitCtx,
 	}
 	if err := settings.apply(cfg, *profile, given); err != nil {
 		return err
@@ -142,6 +143,17 @@ func run() error {
 	}
 
 	defer tool.StopJobs()
+
+	var blobs *session.Blobs
+	if *checkpoints && !*noSave {
+		dir, err := paths.Data("sessions", paths.Slug(cwd), "blobs")
+		if err != nil {
+			return err
+		}
+		if blobs, err = session.OpenBlobs(dir); err != nil {
+			return err
+		}
+	}
 
 	repo, rec, err := openSession(*noSave, *resumeID, *carryOn)
 	if err != nil {
@@ -278,6 +290,7 @@ func run() error {
 			Restored:     restored,
 			Wire:         wire,
 			Remembered:   remembered,
+			Blobs:        blobs,
 		})
 	}
 
@@ -298,6 +311,7 @@ func run() error {
 	m.UseRemembered(remembered)
 	m.UseMemory(memory)
 	m.UseTodo(todo)
+	m.UseCheckpoints(blobs)
 	if len(restored.Messages) > 0 {
 		m.Restore(restored)
 	}
