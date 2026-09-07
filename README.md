@@ -162,6 +162,34 @@ The branch, what is changed and the last few commits go in beside it;
 its `memory` tool — conventions, gotchas, how the tests run — goes in too,
 from `~/.local/share/zaino/memory/<project>.md`; `/memory` shows it.
 
+## Hooks
+
+Commands of your own that run at points in the loop, from the same config:
+
+```json
+{
+  "hooks": {
+    "session-start": [{"run": "git fetch -q"}],
+    "pre-tool":      [{"tool": "bash", "run": "sh .zaino/guard.sh"}],
+    "post-tool":     [{"tool": "edit,write", "run": "gofmt -l . 2>&1"}],
+    "turn-end":      [{"run": "notify-send zaino done"}]
+  }
+}
+```
+
+Each runs with `sh -c` in the project directory, the event's details on
+stdin as JSON — the tool, its input, and for `post-tool` its result — and
+`ZAINO_EVENT`, `ZAINO_TOOL` and `ZAINO_SESSION` in the environment. `tool`
+narrows a hook to some tools; without it the hook runs for all of them.
+
+Exit 0 lets the call through, and whatever a `post-tool` hook prints goes
+back to the model on the end of the result — a formatter's complaints, say.
+Exit 2 blocks: a `pre-tool` hook's stderr goes back to the model as the
+error instead of the call, and a `post-tool` hook's marks the result as one.
+Any other exit is reported to you and ignored. Thirty seconds is the limit
+unless `timeout_ms` says otherwise. `/hooks` lists what is set up, and a
+project's hooks run after your own.
+
 ## Development
 
 ```bash

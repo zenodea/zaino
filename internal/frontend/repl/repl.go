@@ -84,6 +84,7 @@ func Run(ag *agent.Agent, o Options) error {
 			}
 			fmt.Fprintf(os.Stderr, "\x1b[2m· %s → %s (%d bytes)\x1b[0m\n", call.Name, status, len(result))
 		},
+		OnHookFailed: func(err error) { fmt.Fprintln(os.Stderr, "\x1b[31m"+err.Error()+"\x1b[0m") },
 	}
 	if o.ShowThinking {
 		ag.Hooks.OnThinkingDelta = func(text string) {

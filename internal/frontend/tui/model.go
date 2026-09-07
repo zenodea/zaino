@@ -265,6 +265,10 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.steered = max(m.steered-int(msg), 0)
 		return m, m.waitForEvent()
 
+	case hookFailedMsg:
+		m.push(entry{kind: entryError, text: msg.err.Error()})
+		return m, m.waitForEvent()
+
 	case taskStartMsg:
 		m.startTask(msg)
 		return m, m.waitForEvent()
@@ -669,9 +673,12 @@ func (m *Model) hooks(ctx context.Context) agent.Hooks {
 		OnTaskDone: func(id string, history []llm.Message, err error) {
 			emit(taskDoneMsg{id: id, history: history, failed: err != nil})
 		},
-		OnSteer: func(msgs []llm.Message) { emit(steerMsg(len(msgs))) },
+		OnSteer:      func(msgs []llm.Message) { emit(steerMsg(len(msgs))) },
+		OnHookFailed: func(err error) { emit(hookFailedMsg{err}) },
 	}
 }
+
+type hookFailedMsg struct{ err error }
 
 func (m *Model) run(ctx context.Context, messages []llm.Message) {
 	updated, err := m.agent.Run(ctx, messages)

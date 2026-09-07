@@ -15,6 +15,7 @@ import (
 	"github.com/zenodea/zaino/internal/config"
 	"github.com/zenodea/zaino/internal/frontend/repl"
 	"github.com/zenodea/zaino/internal/frontend/tui"
+	"github.com/zenodea/zaino/internal/hook"
 	"github.com/zenodea/zaino/internal/llm"
 	"github.com/zenodea/zaino/internal/mcp"
 	"github.com/zenodea/zaino/internal/permission"
@@ -217,6 +218,18 @@ func run() error {
 		prices.Set(id, llm.Price{Input: p.Input, Output: p.Output, CacheRead: p.CacheRead, CacheWrite: p.CacheWrite})
 	}
 	ag.Budget = agent.NewBudget(prices, *maxSpend)
+	hookList, err := cfg.HookList()
+	if err != nil {
+		return err
+	}
+	if len(hookList) > 0 {
+		ag.Hook = hook.New(orDefault(cfg.Project, cwd), hookList)
+		ag.Hook.Session = rec.ID()
+		ag.Hooks.OnHookFailed = func(err error) { fmt.Fprintln(os.Stderr, "zaino:", err) }
+		for _, err := range ag.Hook.Fire(context.Background(), hook.Payload{Event: hook.SessionStart}).Failed {
+			fmt.Fprintln(os.Stderr, "zaino:", err)
+		}
+	}
 	if !*noCompact {
 		ag.Compaction = &agent.Compaction{Window: *contextWindow}
 	}

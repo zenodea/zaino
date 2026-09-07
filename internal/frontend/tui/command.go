@@ -144,6 +144,12 @@ func commandList() []command {
 			run:     cmdLimit,
 		},
 		{
+			name:    "hooks",
+			summary: "the commands your config runs around the loop",
+			run:     cmdHooks,
+			live:    true,
+		},
+		{
 			name:    "todo",
 			aliases: []string{"plan"},
 			summary: "the plan the model laid out, and how far it is",
@@ -836,6 +842,23 @@ func (m *Model) costLines() []string {
 		humanTokens(u.InputTokens), humanTokens(u.OutputTokens+u.ThinkingTokens), strings.Join(models, ", "))),
 		hintStyle.Render(pad("", 13)+"— name them under \"prices\" in your config"))
 	return lines
+}
+
+func cmdHooks(m *Model, _ string) tea.Cmd {
+	hooks := m.agent.Hook.List()
+	if len(hooks) == 0 {
+		m.notice("hooks: none · add them under \"hooks\" in your config")
+		return nil
+	}
+	lines := make([]string, 0, len(hooks))
+	for _, h := range hooks {
+		on := string(h.Event)
+		if len(h.Tools) > 0 {
+			on += " · " + strings.Join(h.Tools, ", ")
+		}
+		lines = append(lines, keyed(on, h.Run))
+	}
+	return m.show("hooks", lines)
 }
 
 func cmdTodo(m *Model, _ string) tea.Cmd {

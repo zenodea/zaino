@@ -7,6 +7,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/zenodea/zaino/internal/hook"
 	"github.com/zenodea/zaino/internal/llm"
 	"github.com/zenodea/zaino/internal/permission"
 	"github.com/zenodea/zaino/internal/tool"
@@ -29,6 +30,8 @@ type Hooks struct {
 	// OnSteer is called when something said mid-turn has gone in with a
 	// batch of tool results.
 	OnSteer func(msgs []llm.Message)
+
+	OnHookFailed func(err error)
 }
 
 type Agent struct {
@@ -51,6 +54,7 @@ type Agent struct {
 	Gate       *permission.Gate
 	Compaction *Compaction
 	Budget     *Budget
+	Hook       *hook.Set
 
 	MaxTurns  int
 	TaskTurns int
@@ -209,6 +213,7 @@ func (a *Agent) Run(ctx context.Context, history []llm.Message) ([]llm.Message, 
 			return history, ErrTruncated
 
 		default:
+			a.fire(ctx, hook.Payload{Event: hook.TurnEnd})
 			return history, nil
 		}
 	}
@@ -330,7 +335,23 @@ func (a *Agent) admit(ctx context.Context, call llm.ToolUseBlock) (ready tool.Ca
 	if err := a.Gate.Check(ctx, ready.Request()); err != nil {
 		return nil, err
 	}
+	if out := a.fire(ctx, hook.Payload{Event: hook.PreTool, Tool: call.Name, Input: call.Input}); out.Blocked != "" {
+		return nil, &hook.Blocked{Reason: out.Blocked}
+	}
 	return ready, nil
+}
+
+func (a *Agent) fire(ctx context.Context, p hook.Payload) hook.Outcome {
+	if a.Hook == nil {
+		return hook.Outcome{}
+	}
+	out := a.Hook.Fire(ctx, p)
+	if a.Hooks.OnHookFailed != nil {
+		for _, err := range out.Failed {
+			a.Hooks.OnHookFailed(err)
+		}
+	}
+	return out
 }
 
 func (a *Agent) execute(ctx context.Context, call llm.ToolUseBlock, ready tool.Call) (block llm.ToolResultBlock) {
@@ -345,10 +366,26 @@ func (a *Agent) execute(ctx context.Context, call llm.ToolUseBlock, ready tool.C
 		ctx = tool.WithProgress(ctx, func(chunk string) { on(call, chunk) })
 	}
 	out, err := ready.Run(ctx)
-	if err != nil {
-		return a.result(call, "Error: "+err.Error(), true)
+	isErr := err != nil
+	if isErr {
+		out = "Error: " + err.Error()
 	}
-	return a.result(call, out, false)
+	out, isErr = a.afterTool(ctx, call, out, isErr)
+	return a.result(call, out, isErr)
+}
+
+func (a *Agent) afterTool(ctx context.Context, call llm.ToolUseBlock, out string, isErr bool) (string, bool) {
+	if !a.Hook.Has(hook.PostTool) {
+		return out, isErr
+	}
+	said := a.fire(ctx, hook.Payload{Event: hook.PostTool, Tool: call.Name, Input: call.Input, Result: out, IsError: isErr})
+	if said.Blocked != "" {
+		return out + "\n\nError: " + said.Blocked, true
+	}
+	if len(said.Said) > 0 {
+		out += "\n\n[hook] " + strings.Join(said.Said, "\n[hook] ")
+	}
+	return out, isErr
 }
 
 func (a *Agent) result(call llm.ToolUseBlock, out string, isErr bool) llm.ToolResultBlock {

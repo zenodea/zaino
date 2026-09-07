@@ -182,6 +182,7 @@ func (c *taskCall) spawn(id string, cancel context.CancelFunc) (*Agent, TaskInfo
 		Thinking:  c.parent.Thinking,
 		Gate:      c.parent.Gate,
 		Budget:    c.parent.Budget,
+		Hook:      c.parent.Hook,
 		MaxTurns:  orDefault(c.parent.TaskTurns, DefaultTaskTurns),
 	}
 

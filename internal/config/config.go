@@ -9,9 +9,12 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
+	"time"
 
 	"github.com/zenodea/zaino/internal/agent"
+	"github.com/zenodea/zaino/internal/hook"
 	"github.com/zenodea/zaino/internal/store/last"
 	"github.com/zenodea/zaino/internal/x/paths"
 )
@@ -48,6 +51,15 @@ type File struct {
 
 	// How many tokens a model holds, for the ones zaino does not know.
 	Windows map[string]int `json:"windows,omitempty"`
+
+	// Commands to run at points in the loop, keyed by event.
+	Hooks map[string][]HookSpec `json:"hooks,omitempty"`
+}
+
+type HookSpec struct {
+	Tool      string `json:"tool,omitempty"`
+	Run       string `json:"run"`
+	TimeoutMS int    `json:"timeout_ms,omitempty"`
 }
 
 type Price struct {
@@ -221,6 +233,44 @@ func (f *File) merge(o File) {
 	for id, n := range o.Windows {
 		f.Windows[id] = n
 	}
+	if len(o.Hooks) > 0 && f.Hooks == nil {
+		f.Hooks = map[string][]HookSpec{}
+	}
+	for event, specs := range o.Hooks {
+		f.Hooks[event] = append(f.Hooks[event], specs...)
+	}
+}
+
+func (f *File) HookList() ([]hook.Hook, error) {
+	var out []hook.Hook
+	for _, event := range hook.Events {
+		for i, spec := range f.Hooks[string(event)] {
+			if strings.TrimSpace(spec.Run) == "" {
+				return nil, fmt.Errorf("hooks.%s[%d]: run is empty", event, i)
+			}
+			h := hook.Hook{Event: event, Run: spec.Run, Timeout: time.Duration(spec.TimeoutMS) * time.Millisecond}
+			for _, name := range strings.Split(spec.Tool, ",") {
+				if name = strings.TrimSpace(name); name != "" {
+					h.Tools = append(h.Tools, name)
+				}
+			}
+			out = append(out, h)
+		}
+	}
+	for event := range f.Hooks {
+		if !slices.Contains(hook.Events, hook.Event(event)) {
+			return nil, fmt.Errorf("hooks.%s: no such event — have %s", event, joinEvents())
+		}
+	}
+	return out, nil
+}
+
+func joinEvents() string {
+	names := make([]string, len(hook.Events))
+	for i, e := range hook.Events {
+		names[i] = string(e)
+	}
+	return strings.Join(names, ", ")
 }
 
 func set[T comparable](dst *T, v T) {
