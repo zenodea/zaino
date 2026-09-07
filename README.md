@@ -138,6 +138,12 @@ Two files with the same shape, project over user, and a flag beats both:
 }
 ```
 
+What you pick at the prompt with `/provider`, `/model` and `/effort` is where
+the next zaino in that project starts from. It lives in
+`~/.local/state/zaino/last.json`, ranks above your own config.json and below
+the project's, and never beats a flag; a project you have not picked in yet
+starts from the most recent pick anywhere. `-no-config` leaves it alone too.
+
 `system.md` beside it is the system prompt; `agents/*.md` describes subagents
 `task` can run by name; `mcp.json` declares MCP servers. A `ZAINO.md` in the
 repository is read every run and says where zaino is, not what it is for.

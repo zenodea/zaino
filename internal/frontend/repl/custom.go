@@ -72,14 +72,14 @@ func useProfile(ag *agent.Agent, name string, o Options) error {
 
 	if p.Model != "" {
 		ag.Model = p.Model
-		o.Recorder.Append(session.Model(ag.Provider.Name(), p.Model))
+		o.record(session.Model(ag.Provider.Name(), p.Model))
 	}
 	if p.MaxTokens != 0 {
 		ag.MaxTokens = p.MaxTokens
 	}
 	if p.Effort != "" {
 		ag.Effort = p.Effort
-		o.Recorder.Append(session.Effort(p.Effort))
+		o.record(session.Effort(p.Effort))
 	}
 	if p.System != "" {
 		ag.System = p.System

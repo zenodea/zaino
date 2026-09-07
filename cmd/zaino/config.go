@@ -8,6 +8,8 @@ import (
 
 	"github.com/zenodea/zaino/internal/config"
 	"github.com/zenodea/zaino/internal/permission"
+	"github.com/zenodea/zaino/internal/provider"
+	"github.com/zenodea/zaino/internal/store/last"
 )
 
 // The flag set by another name, so the config files can reach the same values
@@ -135,4 +137,22 @@ func readPrompt(value string) (string, error) {
 		return "", fmt.Errorf("-system: %w", err)
 	}
 	return strings.TrimSpace(string(raw)), nil
+}
+
+// What the last run here picked, minus a provider nothing here can reach any
+// more: a key that went away should not keep zaino from starting. The model
+// goes with it, being that provider's.
+func rememberedSettings(store *last.Store) (last.Settings, error) {
+	if store == nil {
+		return last.Settings{}, nil
+	}
+	s, err := store.Load()
+	if err != nil {
+		return last.Settings{}, err
+	}
+	if s.Provider != "" && !provider.HasCredentials(s.Provider) {
+		fmt.Fprintf(os.Stderr, "zaino: nothing here can reach %s now, so not starting on it\n", s.Provider)
+		s.Provider, s.Model = "", nil
+	}
+	return s, nil
 }

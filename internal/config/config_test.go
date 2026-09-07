@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/zenodea/zaino/internal/store/last"
 )
 
 func write(t *testing.T, path, body string) {
@@ -35,7 +37,7 @@ func TestProjectOverridesUser(t *testing.T) {
 	write(t, filepath.Join(user, "config.json"), `{"model": "user-model", "effort": "low", "vim": false}`)
 	write(t, filepath.Join(project, ".zaino", "config.json"), `{"model": "project-model"}`)
 
-	cfg, err := Load(project)
+	cfg, err := Load(project, last.Settings{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -59,7 +61,7 @@ func TestRulesAddUp(t *testing.T) {
 	write(t, filepath.Join(user, "config.json"), `{"allow": ["bash:git status"], "deny": ["read:.env"]}`)
 	write(t, filepath.Join(project, ".zaino", "config.json"), `{"allow": ["bash:go test"]}`)
 
-	cfg, err := Load(project)
+	cfg, err := Load(project, last.Settings{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -75,7 +77,7 @@ func TestUnknownKeyIsAnError(t *testing.T) {
 	user, project := setup(t)
 	write(t, filepath.Join(user, "config.json"), `{"modle": "typo"}`)
 
-	_, err := Load(project)
+	_, err := Load(project, last.Settings{})
 	if err == nil {
 		t.Fatal("got nil, want an error naming the file")
 	}
@@ -88,7 +90,7 @@ func TestSystemFileAndKey(t *testing.T) {
 	user, project := setup(t)
 	write(t, filepath.Join(user, "system.md"), "be terse\n")
 
-	cfg, err := Load(project)
+	cfg, err := Load(project, last.Settings{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -97,7 +99,7 @@ func TestSystemFileAndKey(t *testing.T) {
 	}
 
 	write(t, filepath.Join(user, "config.json"), `{"system": "the key wins"}`)
-	if cfg, err = Load(project); err != nil {
+	if cfg, err = Load(project, last.Settings{}); err != nil {
 		t.Fatal(err)
 	}
 	if cfg.System != "the key wins" {
@@ -110,7 +112,7 @@ func TestContextIsGatheredOutermostFirst(t *testing.T) {
 	write(t, filepath.Join(project, "ZAINO.md"), "the repo")
 	write(t, filepath.Join(project, "internal", "tool", "ZAINO.md"), "the corner")
 
-	cfg, err := Load(filepath.Join(project, "internal", "tool"))
+	cfg, err := Load(filepath.Join(project, "internal", "tool"), last.Settings{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -128,7 +130,7 @@ func TestContextIsNotTheSystemPrompt(t *testing.T) {
 	_, project := setup(t)
 	write(t, filepath.Join(project, "ZAINO.md"), "the repo")
 
-	cfg, err := Load(project)
+	cfg, err := Load(project, last.Settings{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -141,7 +143,7 @@ func TestProjectFoundFromASubdirectory(t *testing.T) {
 	_, project := setup(t)
 	write(t, filepath.Join(project, ".zaino", "config.json"), `{"model": "found"}`)
 
-	cfg, err := Load(filepath.Join(project, "internal", "tool"))
+	cfg, err := Load(filepath.Join(project, "internal", "tool"), last.Settings{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -156,7 +158,7 @@ func TestCommandsAndAgents(t *testing.T) {
 	write(t, filepath.Join(project, ".zaino", "commands", "review.md"), "the project's version")
 	write(t, filepath.Join(user, "agents", "scout.md"), "---\ndescription: find things\ntools: read, grep\n---\nYou search.")
 
-	cfg, err := Load(project)
+	cfg, err := Load(project, last.Settings{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -182,7 +184,7 @@ func TestABuiltinCommandCanBeReplaced(t *testing.T) {
 	user, project := setup(t)
 	write(t, filepath.Join(user, "commands", "bro.md"), "say it in latin")
 
-	cfg, err := Load(project)
+	cfg, err := Load(project, last.Settings{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -223,7 +225,7 @@ func TestMCPFilesIncludeTheOldHome(t *testing.T) {
 	data := os.Getenv("XDG_DATA_HOME")
 	write(t, filepath.Join(data, "zaino", "mcp.json"), `{"servers":{}}`)
 
-	cfg, err := Load(project)
+	cfg, err := Load(project, last.Settings{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -233,7 +235,7 @@ func TestMCPFilesIncludeTheOldHome(t *testing.T) {
 
 	user := filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "zaino")
 	write(t, filepath.Join(user, "mcp.json"), `{"servers":{}}`)
-	if cfg, err = Load(project); err != nil {
+	if cfg, err = Load(project, last.Settings{}); err != nil {
 		t.Fatal(err)
 	}
 	if len(cfg.MCP) != 1 || !strings.HasPrefix(cfg.MCP[0], user) {
@@ -244,7 +246,7 @@ func TestMCPFilesIncludeTheOldHome(t *testing.T) {
 func TestNoConfigAnywhere(t *testing.T) {
 	_, project := setup(t)
 
-	cfg, err := Load(project)
+	cfg, err := Load(project, last.Settings{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -254,4 +256,49 @@ func TestNoConfigAnywhere(t *testing.T) {
 	if len(cfg.Commands) != len(Builtins()) {
 		t.Errorf("commands = %d, want the built-ins to be there regardless", len(cfg.Commands))
 	}
+}
+
+func TestRememberedSitsBetweenTheFiles(t *testing.T) {
+	user, project := setup(t)
+	write(t, filepath.Join(user, "config.json"), `{"provider": "openai", "model": "user-model", "effort": "low"}`)
+	write(t, filepath.Join(project, ".zaino", "config.json"), `{"effort": "high"}`)
+
+	model, effort := "picked", ""
+	cfg, err := Load(project, last.Settings{Provider: "anthropic", Model: &model, Effort: &effort, From: "/state/last.json"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Provider != "anthropic" || cfg.Model != "picked" {
+		t.Errorf("provider/model = %q/%q, want the last pick over the user's file", cfg.Provider, cfg.Model)
+	}
+	if cfg.Effort != "high" {
+		t.Errorf("effort = %q, want the project's file over the last pick", cfg.Effort)
+	}
+	if !contains(cfg.Sources, "/state/last.json") {
+		t.Errorf("sources = %v, want the state file named", cfg.Sources)
+	}
+}
+
+// Going back to the provider's default is a pick like any other.
+func TestARememberedDefaultBeatsTheUsersFile(t *testing.T) {
+	user, project := setup(t)
+	write(t, filepath.Join(user, "config.json"), `{"effort": "low"}`)
+
+	effort := ""
+	cfg, err := Load(project, last.Settings{Effort: &effort})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Effort != "" {
+		t.Errorf("effort = %q, want the default that was picked", cfg.Effort)
+	}
+}
+
+func contains(list []string, s string) bool {
+	for _, x := range list {
+		if x == s {
+			return true
+		}
+	}
+	return false
 }

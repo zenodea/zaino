@@ -4,6 +4,7 @@ import (
 	"strings"
 
 	"github.com/zenodea/zaino/internal/llm"
+	"github.com/zenodea/zaino/internal/store/last"
 	"github.com/zenodea/zaino/internal/store/recall"
 	"github.com/zenodea/zaino/internal/store/session"
 	"github.com/zenodea/zaino/internal/store/wirelog"
@@ -19,6 +20,8 @@ func (m *Model) UseSession(repo session.Repo, rec *session.Recorder) {
 }
 
 func (m *Model) UseWireLog(w *wirelog.Log) { m.wire = w }
+
+func (m *Model) UseRemembered(s *last.Store) { m.remembered = s }
 
 func (m *Model) Restore(c session.Context) {
 	m.messages = c.Messages
@@ -86,8 +89,19 @@ func (m *Model) compacted(msg compactMsg) {
 	m.notice("compacted · %d messages kept", max(len(msg.Kept)-1, 0))
 }
 
+// record puts an entry in the session and, when it is a setting picked at
+// the prompt, notes it as where the next zaino here starts from. A restored
+// or rewound session sets the agent directly and so is not a pick.
 func (m *Model) record(n session.New) {
 	m.saveError(m.rec.Append(n))
+	s, ok := last.Of(n)
+	if !ok || m.remembered == nil {
+		return
+	}
+	if err := m.remembered.Remember(s); err != nil && !m.rememberFailed {
+		m.rememberFailed = true
+		m.push(entry{kind: entryError, text: "settings not being remembered: " + err.Error()})
+	}
 }
 
 func (m *Model) saveError(err error) {

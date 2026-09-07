@@ -19,6 +19,7 @@ import (
 	"github.com/zenodea/zaino/internal/llm"
 	"github.com/zenodea/zaino/internal/permission"
 	"github.com/zenodea/zaino/internal/store/credentials"
+	"github.com/zenodea/zaino/internal/store/last"
 	"github.com/zenodea/zaino/internal/store/recall"
 	"github.com/zenodea/zaino/internal/store/session"
 	"github.com/zenodea/zaino/internal/store/wirelog"
@@ -84,6 +85,10 @@ type Model struct {
 	rec        *session.Recorder
 	wire       *wirelog.Log
 	saveFailed bool
+
+	// Where the next zaino in this project starts from; nil forgets.
+	remembered     *last.Store
+	rememberFailed bool
 
 	entries  []entry
 	rendered []string

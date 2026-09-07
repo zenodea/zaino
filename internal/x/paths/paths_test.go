@@ -87,3 +87,30 @@ func TestSlugSeparatesSiblings(t *testing.T) {
 		t.Error("distinct directories produced the same slug")
 	}
 }
+
+func TestStateRootsUnderXDG(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("XDG_STATE_HOME", root)
+
+	got, err := State("last.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := filepath.Join(root, "zaino", "last.json"); got != want {
+		t.Errorf("got %q, want %q", got, want)
+	}
+}
+
+func TestStateFallsBackToHome(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("XDG_STATE_HOME", "")
+	t.Setenv("HOME", home)
+
+	got, err := State("last.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := filepath.Join(home, ".local", "state", "zaino", "last.json"); got != want {
+		t.Errorf("got %q, want %q", got, want)
+	}
+}

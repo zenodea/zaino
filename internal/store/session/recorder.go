@@ -10,11 +10,18 @@ import (
 type Recorder struct {
 	store Store
 
+	// A session that has nothing in it is not worth a file. Until the first
+	// message lands, entries wait here and create is what turns them into one.
+	create func() (Store, error)
+	queued []New
+
 	written int
 	pending []llm.Usage
 }
 
 func NewRecorder(store Store) *Recorder { return &Recorder{store: store} }
+
+func Lazy(create func() (Store, error)) *Recorder { return &Recorder{create: create} }
 
 func (r *Recorder) Store() Store {
 	if r == nil {
@@ -25,6 +32,26 @@ func (r *Recorder) Store() Store {
 
 func (r *Recorder) Use(store Store, written int) {
 	r.store, r.written, r.pending = store, written, nil
+	r.create, r.queued = nil, nil
+}
+
+func (r *Recorder) open() error {
+	if r.store != nil || r.create == nil {
+		return nil
+	}
+	store, err := r.create()
+	if err != nil {
+		return err
+	}
+	r.store = store
+	queued := r.queued
+	r.queued = nil
+	for _, n := range queued {
+		if _, err := store.Append(n); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (r *Recorder) Turn(u llm.Usage) {
@@ -35,7 +62,13 @@ func (r *Recorder) Turn(u llm.Usage) {
 }
 
 func (r *Recorder) Append(n New) error {
-	if r == nil || r.store == nil {
+	if r == nil {
+		return nil
+	}
+	if r.store == nil {
+		if r.create != nil {
+			r.queued = append(r.queued, n)
+		}
 		return nil
 	}
 	_, err := r.store.Append(n)
@@ -45,6 +78,11 @@ func (r *Recorder) Append(n New) error {
 func (r *Recorder) Messages(messages []llm.Message) error {
 	if r == nil {
 		return nil
+	}
+	if len(messages) > r.written {
+		if err := r.open(); err != nil {
+			return err
+		}
 	}
 	if r.store == nil {
 		r.written, r.pending = len(messages), nil
@@ -157,6 +195,10 @@ func (r *Recorder) Jump(leaf string, written int) error {
 
 func (r *Recorder) Clear() error {
 	if r == nil {
+		return nil
+	}
+	if r.store == nil {
+		r.written, r.pending = 0, nil
 		return nil
 	}
 	err := r.Append(Clear())

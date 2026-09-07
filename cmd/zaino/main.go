@@ -20,6 +20,7 @@ import (
 	"github.com/zenodea/zaino/internal/permission"
 	"github.com/zenodea/zaino/internal/provider"
 	"github.com/zenodea/zaino/internal/store/credentials"
+	"github.com/zenodea/zaino/internal/store/last"
 	"github.com/zenodea/zaino/internal/store/recall"
 	"github.com/zenodea/zaino/internal/store/session"
 	"github.com/zenodea/zaino/internal/store/wirelog"
@@ -92,8 +93,17 @@ func run() error {
 	}
 
 	cfg := config.None()
+	var remembered *last.Store
 	if !*noConfig {
-		if cfg, err = config.Load(cwd); err != nil {
+		if remembered, err = last.Open(config.FindProject(cwd)); err != nil {
+			fmt.Fprintln(os.Stderr, "zaino: not remembering settings:", err)
+			remembered = nil
+		}
+		picked, err := rememberedSettings(remembered)
+		if err != nil {
+			return err
+		}
+		if cfg, err = config.Load(cwd, picked); err != nil {
 			return err
 		}
 	}
@@ -126,15 +136,14 @@ func run() error {
 		defer wire.Close()
 	}
 
-	repo, store, err := openSession(*noSave, *resumeID, *carryOn)
+	repo, rec, err := openSession(*noSave, *resumeID, *carryOn)
 	if err != nil {
 		return err
 	}
-	rec := session.NewRecorder(store)
 	defer rec.Close()
 
 	var restored session.Context
-	if store != nil {
+	if store := rec.Store(); store != nil {
 		entries, err := store.Entries()
 		if err != nil {
 			return err
@@ -236,6 +245,7 @@ func run() error {
 			Recorder:     rec,
 			Restored:     restored,
 			Wire:         wire,
+			Remembered:   remembered,
 		})
 	}
 
@@ -252,6 +262,7 @@ func run() error {
 	}
 	m.UseSession(repo, rec)
 	m.UseWireLog(wire)
+	m.UseRemembered(remembered)
 	if len(restored.Messages) > 0 {
 		m.Restore(restored)
 	}
@@ -328,9 +339,9 @@ func commaList(s string) []string {
 	return out
 }
 
-func openSession(noSave bool, resumeID string, carryOn bool) (session.Repo, session.Store, error) {
+func openSession(noSave bool, resumeID string, carryOn bool) (session.Repo, *session.Recorder, error) {
 	if noSave {
-		return nil, nil, nil
+		return nil, session.NewRecorder(nil), nil
 	}
 
 	cwd, err := os.Getwd()
@@ -340,13 +351,16 @@ func openSession(noSave bool, resumeID string, carryOn bool) (session.Repo, sess
 	repo, err := session.Open(cwd)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "zaino: sessions are not being saved:", err)
-		return nil, nil, nil
+		return nil, session.NewRecorder(nil), nil
 	}
 
 	switch {
 	case resumeID != "":
 		store, err := repo.Open(resumeID)
-		return repo, store, err
+		if err != nil {
+			return nil, nil, err
+		}
+		return repo, session.NewRecorder(store), nil
 
 	case carryOn:
 		latest, ok, err := repo.Latest()
@@ -355,13 +369,17 @@ func openSession(noSave bool, resumeID string, carryOn bool) (session.Repo, sess
 		}
 		if ok {
 			store, err := repo.Open(latest.ID)
-			return repo, store, err
+			if err != nil {
+				return nil, nil, err
+			}
+			return repo, session.NewRecorder(store), nil
 		}
 		fmt.Fprintln(os.Stderr, "zaino: nothing to continue here, starting fresh")
 	}
 
-	store, err := repo.Create()
-	return repo, store, err
+	// The file is only written once there is a message to put in it, so
+	// opening zaino and closing it again leaves nothing behind.
+	return repo, session.Lazy(repo.Create), nil
 }
 
 func applyRestored(ag *agent.Agent, c session.Context, given map[string]bool) {
@@ -383,10 +401,6 @@ func applyRestored(ag *agent.Agent, c session.Context, given map[string]bool) {
 }
 
 func recordSettings(rec *session.Recorder, ag *agent.Agent, providerName string, c session.Context) error {
-	if rec.Store() == nil {
-		return nil
-	}
-
 	if c.Provider != providerName || c.Model != ag.Model {
 		if err := rec.Append(session.Model(providerName, ag.Model)); err != nil {
 			return err

@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/zenodea/zaino/internal/config"
+	"github.com/zenodea/zaino/internal/store/last"
 )
 
 func settingsFor(model, effort *string, thinking *bool) knobs {
@@ -112,3 +113,31 @@ func TestReadPrompt(t *testing.T) {
 		t.Error("a missing file went unreported")
 	}
 }
+
+func TestARememberedProviderWithNoWayInIsDropped(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	store, err := last.Open("/work/a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	model, effort := "some-model", "high"
+	if err := store.Remember(last.Settings{Provider: "nowhere", Model: &model, Effort: &effort}); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := rememberedSettings(store)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Provider != "" || got.Model != nil {
+		t.Errorf("provider/model = %q/%v, want both dropped with the provider", got.Provider, got.Model)
+	}
+	if got.Effort == nil || *got.Effort != "high" {
+		t.Errorf("effort = %v, want kept, it is not the provider's", got.Effort)
+	}
+	if got, _ := rememberedSettings(nil); !reflectEmpty(got) {
+		t.Errorf("no store → %+v, want nothing", got)
+	}
+}
+
+func reflectEmpty(s last.Settings) bool { return s.Provider == "" && s.Model == nil && s.Effort == nil }

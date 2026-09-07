@@ -18,6 +18,7 @@ import (
 	"github.com/zenodea/zaino/internal/config"
 	"github.com/zenodea/zaino/internal/llm"
 	"github.com/zenodea/zaino/internal/permission"
+	"github.com/zenodea/zaino/internal/store/last"
 	"github.com/zenodea/zaino/internal/store/session"
 	"github.com/zenodea/zaino/internal/store/wirelog"
 )
@@ -41,6 +42,22 @@ type Options struct {
 	Recorder *session.Recorder
 	Restored session.Context
 	Wire     *wirelog.Log
+
+	// Where the next zaino in this project starts from; nil forgets.
+	Remembered *last.Store
+}
+
+// record puts a setting picked at the prompt in the session and notes it
+// for next time.
+func (o Options) record(n session.New) {
+	o.Recorder.Append(n)
+	s, ok := last.Of(n)
+	if !ok || o.Remembered == nil {
+		return
+	}
+	if err := o.Remembered.Remember(s); err != nil {
+		fmt.Fprintln(os.Stderr, "zaino: settings not being remembered:", err)
+	}
 }
 
 func Run(ag *agent.Agent, o Options) error {

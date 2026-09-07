@@ -266,3 +266,48 @@ func TestRecorderWritesTheKeptMessagesAfterTheSummary(t *testing.T) {
 		t.Errorf("rebuilt %q, want %q", texts, want)
 	}
 }
+
+// Opening zaino and closing it again should leave nothing on disk: the file
+// appears with the first message, carrying whatever was set before it.
+func TestLazyRecorderWaitsForTheFirstMessage(t *testing.T) {
+	repo, err := session.OpenDir(t.TempDir(), "/work")
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec := session.Lazy(repo.Create)
+
+	rec.Append(session.Model("anthropic", "claude-fable-5"))
+	rec.Clear()
+	if rec.Store() != nil || rec.ID() != "" {
+		t.Fatal("a session was created before anything was said")
+	}
+	if all, _ := repo.List(); len(all) != 0 {
+		t.Fatalf("%d files on disk, want none", len(all))
+	}
+
+	rec.Messages(nil)
+	if rec.Store() != nil {
+		t.Fatal("an empty message list created a session")
+	}
+
+	if err := rec.Messages([]llm.Message{llm.UserText("hello")}); err != nil {
+		t.Fatalf("Messages: %v", err)
+	}
+	if rec.Store() == nil || rec.ID() == "" {
+		t.Fatal("the first message did not create a session")
+	}
+
+	entries, _ := rec.Store().Entries()
+	ctx := session.Build(entries)
+	if ctx.Model != "claude-fable-5" {
+		t.Errorf("model = %q, want the one set before the first message", ctx.Model)
+	}
+	if len(ctx.Messages) != 1 || ctx.Messages[0].Text() != "hello" {
+		t.Errorf("messages = %v, want just hello", ctx.Messages)
+	}
+	for _, e := range entries {
+		if e.Type == session.KindClear {
+			t.Error("a clear was written to a session that had nothing to clear")
+		}
+	}
+}

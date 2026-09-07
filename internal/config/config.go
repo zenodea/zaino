@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"github.com/zenodea/zaino/internal/agent"
+	"github.com/zenodea/zaino/internal/store/last"
 	"github.com/zenodea/zaino/internal/x/paths"
 )
 
@@ -86,18 +87,23 @@ const dirName = ".zaino"
 // What -no-config leaves you with: the built-in commands and nothing else.
 func None() *Config { return &Config{Commands: Builtins()} }
 
-func Load(cwd string) (*Config, error) {
-	cfg := &Config{Project: findProject(cwd), Commands: Builtins()}
+// Load reads the files, with what the last run here picked at the prompt
+// slotted between them: over what you settled on in general, under what the
+// project pins, and a flag still beats all three.
+func Load(cwd string, remembered last.Settings) (*Config, error) {
+	cfg := &Config{Project: FindProject(cwd), Commands: Builtins()}
 
 	var dirs []string
 	if user, err := paths.Config(); err == nil {
 		dirs = append(dirs, user)
+		if err := cfg.read(user); err != nil {
+			return nil, err
+		}
 	}
+	cfg.remember(remembered)
 	if cfg.Project != "" {
-		dirs = append(dirs, filepath.Join(cfg.Project, dirName))
-	}
-
-	for _, dir := range dirs {
+		dir := filepath.Join(cfg.Project, dirName)
+		dirs = append(dirs, dir)
 		if err := cfg.read(dir); err != nil {
 			return nil, err
 		}
@@ -109,6 +115,24 @@ func Load(cwd string) (*Config, error) {
 	cfg.Context = context
 	cfg.Sources = append(cfg.Sources, from...)
 	return cfg, nil
+}
+
+// An empty remembered model or effort is a pick too — back to the provider's
+// default — so it lands as written rather than through merge, which reads
+// empty as unsaid.
+func (c *Config) remember(s last.Settings) {
+	if s.Provider != "" {
+		c.File.Provider = s.Provider
+	}
+	if s.Model != nil {
+		c.File.Model = *s.Model
+	}
+	if s.Effort != nil {
+		c.File.Effort = *s.Effort
+	}
+	if s.From != "" {
+		c.Sources = append(c.Sources, s.From)
+	}
 }
 
 func (c *Config) read(dir string) error {
@@ -202,7 +226,10 @@ func setBool(dst **bool, v *bool) {
 // The project is the nearest directory above the working one holding a .zaino;
 // failing that, the repository, so a .zaino at its root is found from anywhere
 // inside it.
-func findProject(cwd string) string {
+// FindProject is the directory a run belongs to: the nearest one above the
+// working directory holding a .zaino, failing that the repository, and ""
+// outside either.
+func FindProject(cwd string) string {
 	dir, err := filepath.Abs(cwd)
 	if err != nil {
 		return ""

@@ -94,7 +94,7 @@ func runCommand(ag *agent.Agent, line string, messages []llm.Message,
 			break
 		}
 		ag.Model = arg
-		o.Recorder.Append(session.Model(ag.Provider.Name(), arg))
+		o.record(session.Model(ag.Provider.Name(), arg))
 		notice("model → %s", arg)
 
 	case "provider":
@@ -120,7 +120,7 @@ func runCommand(ag *agent.Agent, line string, messages []llm.Message,
 		// A model id, thinking signatures and tool ids mean nothing there.
 		ag.Provider, ag.Model = backend, ""
 		*usage = llm.Usage{}
-		o.Recorder.Append(session.Model(backend.Name(), ""))
+		o.record(session.Model(backend.Name(), ""))
 		o.Recorder.Clear()
 		notice("provider → %s · %s (context cleared)", backend.Name(), backend.DefaultModel())
 		return outcome{changed: true}
@@ -132,11 +132,11 @@ func runCommand(ag *agent.Agent, line string, messages []llm.Message,
 				strings.Join(efforts, ", "))
 		case arg == "-" || arg == "default":
 			ag.Effort = ""
-			o.Recorder.Append(session.Effort(""))
+			o.record(session.Effort(""))
 			notice("effort → provider default")
 		case slices.Contains(efforts, arg):
 			ag.Effort = arg
-			o.Recorder.Append(session.Effort(arg))
+			o.record(session.Effort(arg))
 			notice("effort → %s", arg)
 		default:
 			fail("unknown effort %q — pick one of %s", arg, strings.Join(efforts, ", "))
