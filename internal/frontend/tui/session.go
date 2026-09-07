@@ -4,6 +4,7 @@ import (
 	"strings"
 
 	"github.com/zenodea/zaino/internal/llm"
+	"github.com/zenodea/zaino/internal/pricing"
 	"github.com/zenodea/zaino/internal/store/last"
 	"github.com/zenodea/zaino/internal/store/recall"
 	"github.com/zenodea/zaino/internal/store/session"
@@ -22,6 +23,8 @@ func (m *Model) UseSession(repo session.Repo, rec *session.Recorder) {
 func (m *Model) UseWireLog(w *wirelog.Log) { m.wire = w }
 
 func (m *Model) UseRemembered(s *last.Store) { m.remembered = s }
+
+func (m *Model) UsePrices(t *pricing.Table) { m.prices = t }
 
 func (m *Model) Restore(c session.Context) {
 	m.messages = c.Messages

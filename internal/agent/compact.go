@@ -123,12 +123,14 @@ func (a *Agent) summarise(ctx context.Context, older []llm.Message) (string, err
 		Model:     a.Model,
 		MaxTokens: min(orDefault(a.MaxTokens, DefaultMaxTokens), 8192),
 		System:    summarySystem,
+		Budget:    a.Budget,
 	}
 
 	resp, err := scribe.turn(ctx, []llm.Message{llm.UserText(serialise(older))})
 	if err != nil {
 		return "", fmt.Errorf("compaction: %w", err)
 	}
+	scribe.charge(resp)
 
 	summary := strings.TrimSpace(resp.Text())
 	if summary == "" {

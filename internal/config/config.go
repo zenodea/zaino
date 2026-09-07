@@ -32,6 +32,7 @@ type File struct {
 	ExcludeTools  []string           `json:"exclude-tools,omitempty"`
 	ContextWindow int                `json:"context-window,omitempty"`
 	MaxContext    string             `json:"max-context,omitempty"`
+	MaxSpend      float64            `json:"max-spend,omitempty"`
 	Vim           *bool              `json:"vim,omitempty"`
 	Mouse         *bool              `json:"mouse,omitempty"`
 	Animate       *bool              `json:"animate,omitempty"`
@@ -190,6 +191,7 @@ func (f *File) merge(o File) {
 	set(&f.Permission, o.Permission)
 	set(&f.ContextWindow, o.ContextWindow)
 	set(&f.MaxContext, o.MaxContext)
+	set(&f.MaxSpend, o.MaxSpend)
 	set(&f.Profile, o.Profile)
 	setBool(&f.Thinking, o.Thinking)
 	setBool(&f.AllowOutside, o.AllowOutside)

@@ -144,6 +144,13 @@ func commandList() []command {
 			run:     cmdLimit,
 		},
 		{
+			name:    "spend",
+			arg:     "[dollars|off]",
+			summary: "show or cap what this session may cost",
+			run:     cmdSpend,
+			live:    true,
+		},
+		{
 			name:    "usage",
 			summary: "token usage for this session",
 			run:     cmdUsage,
@@ -794,6 +801,9 @@ func limitBody(m *Model, limit int) []string {
 func (m *Model) costLines() []string {
 	lines := []string{pad(hintStyle.Render("cost"), 12) + " " + bodyStyle.Render(dollars(m.sessionCost)) +
 		metaStyle.Render(" this run")}
+	if b := m.agent.Budget; b != nil && b.Cap() > 0 {
+		lines = append(lines, hintStyle.Render(pad("", 13)+fmt.Sprintf("cap %s · %s left", dollars(b.Cap()), dollars(max(b.Cap()-b.Spent(), 0)))))
+	}
 	if len(m.unpricedOn) == 0 {
 		return lines
 	}
@@ -807,6 +817,35 @@ func (m *Model) costLines() []string {
 		humanTokens(u.InputTokens), humanTokens(u.OutputTokens+u.ThinkingTokens), strings.Join(models, ", "))),
 		hintStyle.Render(pad("", 13)+"— name them under \"prices\" in your config"))
 	return lines
+}
+
+func cmdSpend(m *Model, arg string) tea.Cmd {
+	b := m.agent.Budget
+	if b == nil {
+		m.push(entry{kind: entryError, text: "nothing is counting the cost this run"})
+		return nil
+	}
+	switch strings.ToLower(arg) {
+	case "":
+		if b.Cap() == 0 {
+			m.notice("spend: %s so far, no cap", dollars(b.Spent()))
+		} else {
+			m.notice("spend: %s of %s", dollars(b.Spent()), dollars(b.Cap()))
+		}
+		return nil
+	case "off", "none", "0":
+		b.SetCap(0)
+		m.notice("spend cap → off")
+		return nil
+	}
+	cap, err := strconv.ParseFloat(strings.TrimPrefix(arg, "$"), 64)
+	if err != nil || cap < 0 {
+		m.push(entry{kind: entryError, text: fmt.Sprintf("usage: /spend [dollars|off], got %q", arg)})
+		return nil
+	}
+	b.SetCap(cap)
+	m.notice("spend cap → %s · the turn that would pass it stops instead", dollars(cap))
+	return nil
 }
 
 func cmdUsage(m *Model, _ string) tea.Cmd {

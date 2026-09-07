@@ -15,7 +15,7 @@ func settingsFor(model, effort *string, thinking *bool) knobs {
 		provider: new(string), model: model, maxTokens: new(int), effort: effort,
 		system: new(string), thinking: thinking, permission: new(string),
 		allowOutside: new(bool), tools: new(string), excludeTools: new(string),
-		contextWindow: new(int), maxContext: new(string), vim: new(bool),
+		contextWindow: new(int), maxContext: new(string), maxSpend: new(float64), vim: new(bool),
 		mouse: new(bool), animate: new(bool), git: new(bool),
 	}
 }

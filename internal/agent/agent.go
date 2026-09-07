@@ -50,6 +50,7 @@ type Agent struct {
 	Tools      []tool.Tool
 	Gate       *permission.Gate
 	Compaction *Compaction
+	Budget     *Budget
 
 	MaxTurns  int
 	TaskTurns int
@@ -163,12 +164,16 @@ func (a *Agent) Run(ctx context.Context, history []llm.Message) ([]llm.Message, 
 				return history, err
 			}
 		}
+		if a.Budget != nil && a.Budget.exceeded() {
+			return history, &SpendLimitError{Spent: a.Budget.Spent(), Cap: a.Budget.Cap()}
+		}
 
 		resp, err := a.turn(ctx, history)
 		if err != nil {
 			return history, err
 		}
 		history = append(history, resp.ToMessage())
+		a.charge(resp)
 		a.used = contextTokens(resp.Usage)
 		a.remeasured(a.used, len(history))
 
@@ -351,6 +356,12 @@ func (a *Agent) result(call llm.ToolUseBlock, out string, isErr bool) llm.ToolRe
 		a.Hooks.OnToolResult(call, out, isErr)
 	}
 	return llm.ToolResultBlock{ToolUseID: call.ID, Content: out, IsError: isErr}
+}
+
+func (a *Agent) charge(resp *llm.Response) {
+	if a.Budget != nil {
+		a.Budget.Charge(orDefault(resp.Model, a.modelID()), resp.Usage)
+	}
 }
 
 func (a *Agent) lookup(name string) (tool.Tool, bool) {

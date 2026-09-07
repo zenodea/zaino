@@ -18,6 +18,7 @@ import (
 	"github.com/zenodea/zaino/internal/llm"
 	"github.com/zenodea/zaino/internal/mcp"
 	"github.com/zenodea/zaino/internal/permission"
+	"github.com/zenodea/zaino/internal/pricing"
 	"github.com/zenodea/zaino/internal/provider"
 	"github.com/zenodea/zaino/internal/store/credentials"
 	"github.com/zenodea/zaino/internal/store/last"
@@ -66,6 +67,7 @@ func run() error {
 
 		maxContext = flag.String("max-context", "off",
 			"stop the session when the context passes this many tokens: 200k, 200000, off")
+		maxSpend = flag.Float64("max-spend", 0, "stop the session once it has cost this many dollars; 0 is no cap")
 
 		gitCtx  = flag.Bool("git", true, "put the branch, status and recent commits in the context")
 		vimKeys = flag.Bool("vim", true, "modal editing in the composer; -vim=false for plain input")
@@ -113,7 +115,7 @@ func run() error {
 		provider: providerName, model: model, maxTokens: maxTokens, effort: effort,
 		system: system, thinking: showThink, permission: permMode, allowOutside: allowOutside,
 		tools: toolNames, excludeTools: excludeTools, contextWindow: contextWindow,
-		maxContext: maxContext, vim: vimKeys, mouse: mouse, animate: animate, git: gitCtx,
+		maxContext: maxContext, maxSpend: maxSpend, vim: vimKeys, mouse: mouse, animate: animate, git: gitCtx,
 	}
 	if err := settings.apply(cfg, *profile, given); err != nil {
 		return err
@@ -202,6 +204,11 @@ func run() error {
 	for id, tokens := range cfg.Windows {
 		agent.SetWindow(id, tokens)
 	}
+	prices := pricing.Known()
+	for id, p := range cfg.Prices {
+		prices.Set(id, llm.Price{Input: p.Input, Output: p.Output, CacheRead: p.CacheRead, CacheWrite: p.CacheWrite})
+	}
+	ag.Budget = agent.NewBudget(prices, *maxSpend)
 	if !*noCompact {
 		ag.Compaction = &agent.Compaction{Window: *contextWindow}
 	}
@@ -254,6 +261,7 @@ func run() error {
 	}
 
 	m := tui.New(ag, backend.Name())
+	m.UsePrices(prices)
 	m.UseConfig(cfg)
 	gate.Approver = m.Approver()
 	m.UseVim(*vimKeys)

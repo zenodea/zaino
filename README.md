@@ -46,7 +46,8 @@ zaino -p "what does install.sh do" -json | jq -r .answer
 ```
 
 `zaino -h` lists the rest of the flags; every one of them can also be set
-once in the config.
+once in the config. `-max-spend 5` stops the session once it has cost five
+dollars, and `/spend` shows or moves the cap from inside.
 
 ## What's in the pack
 

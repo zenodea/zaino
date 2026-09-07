@@ -27,6 +27,7 @@ type knobs struct {
 	excludeTools  *string
 	contextWindow *int
 	maxContext    *string
+	maxSpend      *float64
 	vim           *bool
 	mouse         *bool
 	animate       *bool
@@ -40,6 +41,11 @@ func (k knobs) apply(c *config.Config, profile string, given map[string]bool) er
 		}
 	}
 	num := func(name string, dst *int, v int) {
+		if !given[name] && v != 0 {
+			*dst = v
+		}
+	}
+	flt := func(name string, dst *float64, v float64) {
 		if !given[name] && v != 0 {
 			*dst = v
 		}
@@ -60,6 +66,7 @@ func (k knobs) apply(c *config.Config, profile string, given map[string]bool) er
 	str("exclude-tools", k.excludeTools, strings.Join(c.ExcludeTools, ","))
 	num("context-window", k.contextWindow, c.ContextWindow)
 	str("max-context", k.maxContext, c.MaxContext)
+	flt("max-spend", k.maxSpend, c.MaxSpend)
 	yes("thinking", k.thinking, c.Thinking)
 	yes("allow-outside", k.allowOutside, c.AllowOutside)
 	yes("vim", k.vim, c.Vim)

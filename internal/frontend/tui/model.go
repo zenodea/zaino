@@ -703,11 +703,15 @@ func (m *Model) finishTurn(msg doneMsg) {
 	}
 
 	var overLimit *agent.ContextLimitError
+	var overSpend *agent.SpendLimitError
 
 	switch {
 	case msg.Err == nil:
 	case errors.As(msg.Err, &overLimit):
 		m.holdAtLimit(overLimit)
+	case errors.As(msg.Err, &overSpend):
+		m.push(entry{kind: entryError, text: fmt.Sprintf("spend cap reached · %s of %s · /spend raises it, or takes it off",
+			dollars(overSpend.Spent), dollars(overSpend.Cap))})
 	case errors.Is(msg.Err, agent.ErrMaxTurns):
 		m.holdAtTurns()
 	case errors.Is(msg.Err, context.Canceled):
