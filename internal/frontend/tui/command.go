@@ -144,6 +144,25 @@ func commandList() []command {
 			run:     cmdLimit,
 		},
 		{
+			name:    "todo",
+			aliases: []string{"plan"},
+			summary: "the plan the model laid out, and how far it is",
+			run:     cmdTodo,
+			live:    true,
+		},
+		{
+			name:    "memory",
+			summary: "what the model has noted about this project",
+			run:     cmdMemory,
+			live:    true,
+		},
+		{
+			name:    "jobs",
+			summary: "what bash left running in the background",
+			run:     cmdJobs,
+			live:    true,
+		},
+		{
 			name:    "spend",
 			arg:     "[dollars|off]",
 			summary: "show or cap what this session may cost",
@@ -817,6 +836,67 @@ func (m *Model) costLines() []string {
 		humanTokens(u.InputTokens), humanTokens(u.OutputTokens+u.ThinkingTokens), strings.Join(models, ", "))),
 		hintStyle.Render(pad("", 13)+"— name them under \"prices\" in your config"))
 	return lines
+}
+
+func cmdTodo(m *Model, _ string) tea.Cmd {
+	if m.todo == nil {
+		m.notice("todo: nothing is kept this run")
+		return nil
+	}
+	items := m.todo.Items()
+	if len(items) == 0 {
+		m.notice("todo: no plan laid out")
+		return nil
+	}
+	lines := make([]string, 0, len(items)+2)
+	for _, it := range items {
+		switch it.Status {
+		case "done":
+			lines = append(lines, hintStyle.Render("[x] "+it.Text))
+		case "active":
+			lines = append(lines, bodyStyle.Render("[>] "+it.Text))
+		default:
+			lines = append(lines, metaStyle.Render("[ ] "+it.Text))
+		}
+	}
+	done, total := m.todo.Progress()
+	lines = append(lines, "", hintStyle.Render(fmt.Sprintf("%d of %d done", done, total)))
+	return m.show("todo", lines)
+}
+
+func cmdMemory(m *Model, _ string) tea.Cmd {
+	if m.memory == nil {
+		m.notice("memory: nothing is kept this run")
+		return nil
+	}
+	notes := m.memory.Notes()
+	if len(notes) == 0 {
+		m.notice("memory: nothing noted yet · %s", m.memory.Path())
+		return nil
+	}
+	lines := make([]string, 0, len(notes)+2)
+	for _, n := range notes {
+		lines = append(lines, bodyStyle.Render("- "+n))
+	}
+	lines = append(lines, "", hintStyle.Render(m.memory.Path()))
+	return m.show("memory", lines)
+}
+
+func cmdJobs(m *Model, _ string) tea.Cmd {
+	all := tool.Jobs()
+	if len(all) == 0 {
+		m.notice("jobs: nothing running in the background")
+		return nil
+	}
+	lines := make([]string, len(all))
+	for i, j := range all {
+		status := j.Status
+		if j.Running {
+			status = keyed("running", fmt.Sprintf("pid %d · %s", j.PID, time.Since(j.Started).Truncate(time.Second)))
+		}
+		lines[i] = bodyStyle.Render(j.ID) + "  " + status + "\n" + hintStyle.Render(pad("", 4)+j.Command)
+	}
+	return m.show("jobs", lines)
 }
 
 func cmdSpend(m *Model, arg string) tea.Cmd {

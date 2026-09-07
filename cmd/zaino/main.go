@@ -27,6 +27,7 @@ import (
 	"github.com/zenodea/zaino/internal/store/wirelog"
 	"github.com/zenodea/zaino/internal/tool"
 	"github.com/zenodea/zaino/internal/x/httpx"
+	"github.com/zenodea/zaino/internal/x/paths"
 )
 
 func main() {
@@ -139,6 +140,8 @@ func run() error {
 		defer wire.Close()
 	}
 
+	defer tool.StopJobs()
+
 	repo, rec, err := openSession(*noSave, *resumeID, *carryOn)
 	if err != nil {
 		return err
@@ -174,7 +177,12 @@ func run() error {
 		backend = provider.None(err)
 	}
 
-	gate, tools, err := openToolbox(cwd, *permMode, *allowOutside, *noTools, *toolNames, *excludeTools)
+	memory, err := openMemory(cfg.Project, cwd)
+	if err != nil {
+		return err
+	}
+	todo := tool.NewTodo()
+	gate, tools, err := openToolbox(cwd, *permMode, *allowOutside, *noTools, *toolNames, *excludeTools, memory, todo)
 	if err != nil {
 		return err
 	}
@@ -194,7 +202,7 @@ func run() error {
 		Model:     *model,
 		MaxTokens: *maxTokens,
 		System:    *system,
-		Project:   ground(cfg.Context, *gitCtx, cwd),
+		Project:   ground(cfg.Context, *gitCtx, cwd, memory.Notes()),
 		Subagents: cfg.Subagents,
 		Effort:    *effort,
 		Thinking:  &llm.Thinking{Enabled: true, Show: *showThink},
@@ -275,6 +283,8 @@ func run() error {
 	m.UseSession(repo, rec)
 	m.UseWireLog(wire)
 	m.UseRemembered(remembered)
+	m.UseMemory(memory)
+	m.UseTodo(todo)
 	if len(restored.Messages) > 0 {
 		m.Restore(restored)
 	}
@@ -291,7 +301,23 @@ func run() error {
 	return err
 }
 
-func openToolbox(cwd, mode string, allowOutside, noTools bool, allow, deny string) (*permission.Gate, []tool.Tool, error) {
+func openMemory(project, cwd string) (*tool.Memory, error) {
+	path, err := paths.Data("memory", paths.Slug(orDefault(project, cwd))+".md")
+	if err != nil {
+		return nil, err
+	}
+	return tool.NewMemory(path), nil
+}
+
+func orDefault[T comparable](v, fallback T) T {
+	var zero T
+	if v == zero {
+		return fallback
+	}
+	return v
+}
+
+func openToolbox(cwd, mode string, allowOutside, noTools bool, allow, deny string, extras ...tool.Tool) (*permission.Gate, []tool.Tool, error) {
 	parsed, err := permission.ParseMode(mode)
 	if err != nil {
 		return nil, nil, err
@@ -308,7 +334,7 @@ func openToolbox(cwd, mode string, allowOutside, noTools bool, allow, deny strin
 	if err != nil {
 		return nil, nil, err
 	}
-	tools, err := tool.Select(tool.All(workspace), commaList(allow), commaList(deny))
+	tools, err := tool.Select(append(tool.All(workspace), extras...), commaList(allow), commaList(deny))
 	if err != nil {
 		return nil, nil, err
 	}

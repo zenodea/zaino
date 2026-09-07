@@ -23,6 +23,7 @@ import (
 	"github.com/zenodea/zaino/internal/store/recall"
 	"github.com/zenodea/zaino/internal/store/session"
 	"github.com/zenodea/zaino/internal/store/wirelog"
+	"github.com/zenodea/zaino/internal/tool"
 )
 
 type (
@@ -89,6 +90,8 @@ type Model struct {
 	// Where the next zaino in this project starts from; nil forgets.
 	remembered     *last.Store
 	rememberFailed bool
+	memory         *tool.Memory
+	todo           *tool.Todo
 
 	entries  []entry
 	rendered []string
@@ -707,6 +710,9 @@ func (m *Model) finishTurn(msg doneMsg) {
 
 	switch {
 	case msg.Err == nil:
+		if m.planLaidOut() {
+			m.push(entry{kind: entryNotice, text: "plan laid out · /todo shows it · ⇧⇥ leaves plan mode, then say go"})
+		}
 	case errors.As(msg.Err, &overLimit):
 		m.holdAtLimit(overLimit)
 	case errors.As(msg.Err, &overSpend):
@@ -721,6 +727,14 @@ func (m *Model) finishTurn(msg doneMsg) {
 	default:
 		m.push(entry{kind: entryError, text: msg.Err.Error()})
 	}
+}
+
+func (m *Model) planLaidOut() bool {
+	if m.todo == nil || m.agent.Gate == nil || m.agent.Gate.Policy == nil || m.agent.Gate.Policy.Mode != permission.Plan {
+		return false
+	}
+	done, total := m.todo.Progress()
+	return total > 0 && done == 0
 }
 
 func (m *Model) reset() {
@@ -1297,6 +1311,11 @@ func (m *Model) usageLine() string {
 	}
 	if u.CacheReadTokens > 0 {
 		parts = append(parts, humanTokens(u.CacheReadTokens)+"⚡")
+	}
+	if m.todo != nil {
+		if done, total := m.todo.Progress(); total > 0 {
+			parts = append(parts, fmt.Sprintf("todo %d/%d", done, total))
+		}
 	}
 	if m.sessionCost > 0 {
 		parts = append(parts, dollars(m.sessionCost))

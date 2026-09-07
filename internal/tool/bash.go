@@ -18,8 +18,9 @@ import (
 type Bash struct{ w *Workspace }
 
 type bashArgs struct {
-	Command   string `json:"command"`
-	TimeoutMS int    `json:"timeout_ms,omitempty"`
+	Command    string `json:"command"`
+	TimeoutMS  int    `json:"timeout_ms,omitempty"`
+	Background bool   `json:"background,omitempty"`
 }
 
 const (
@@ -38,6 +39,8 @@ func (b *Bash) Definition() llm.Tool {
 		InputSchema: object(map[string]any{
 			"command":    field("string", "Command line to run, interpreted by sh."),
 			"timeout_ms": field("integer", fmt.Sprintf("How long to allow, in milliseconds. Defaults to %d.", defaultTimeout.Milliseconds())),
+			"background": field("boolean", "Start it and return at once, for servers, watchers and anything long. "+
+				"The result names a job the job tool reads or stops; it is stopped when zaino exits."),
 		}, "command"),
 	}
 }
@@ -56,7 +59,7 @@ func (b *Bash) Prepare(input json.RawMessage) (Call, error) {
 	if args.TimeoutMS > 0 {
 		timeout = min(time.Duration(args.TimeoutMS)*time.Millisecond, maxTimeout)
 	}
-	return &bashCall{dir: b.w.Root, command: command, timeout: timeout}, nil
+	return &bashCall{dir: b.w.Root, command: command, timeout: timeout, background: args.Background}, nil
 }
 
 type reporter func(string)
@@ -67,21 +70,35 @@ func (r reporter) Write(p []byte) (int, error) {
 }
 
 type bashCall struct {
-	dir     string
-	command string
-	timeout time.Duration
+	dir        string
+	command    string
+	timeout    time.Duration
+	background bool
 }
 
 func (c *bashCall) Request() permission.Request {
+	preview := c.command
+	if c.background {
+		preview += "   (in the background)"
+	}
 	return permission.Request{
 		Tool:    "bash",
 		Action:  permission.Execute,
 		Target:  c.command,
-		Preview: c.command,
+		Preview: preview,
 	}
 }
 
 func (c *bashCall) Run(ctx context.Context) (string, error) {
+	if c.background {
+		j, err := jobs.start(c.dir, c.command)
+		if err != nil {
+			return "", err
+		}
+		return fmt.Sprintf("started %s (pid %d) in the background. job {\"id\": %q} reads its output so far, "+
+			"job {\"id\": %q, \"action\": \"kill\"} stops it.", j.id, j.cmd.Process.Pid, j.id, j.id), nil
+	}
+
 	ctx, cancel := context.WithTimeout(ctx, c.timeout)
 	defer cancel()
 

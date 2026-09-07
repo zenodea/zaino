@@ -9,6 +9,7 @@ import (
 	"github.com/zenodea/zaino/internal/store/recall"
 	"github.com/zenodea/zaino/internal/store/session"
 	"github.com/zenodea/zaino/internal/store/wirelog"
+	"github.com/zenodea/zaino/internal/tool"
 )
 
 func (m *Model) UseRecall(l *recall.List) { m.recall = l }
@@ -25,6 +26,10 @@ func (m *Model) UseWireLog(w *wirelog.Log) { m.wire = w }
 func (m *Model) UseRemembered(s *last.Store) { m.remembered = s }
 
 func (m *Model) UsePrices(t *pricing.Table) { m.prices = t }
+
+func (m *Model) UseMemory(mem *tool.Memory) { m.memory = mem }
+
+func (m *Model) UseTodo(t *tool.Todo) { m.todo = t }
 
 func (m *Model) Restore(c session.Context) {
 	m.messages = c.Messages

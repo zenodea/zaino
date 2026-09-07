@@ -44,7 +44,7 @@ func ActionOf(t Tool) permission.Action {
 
 func All(w *Workspace) []Tool {
 	return []Tool{
-		&Read{w}, &Write{w}, &Edit{w}, &Ls{w}, &Find{w}, &Grep{w}, &Bash{w}, &Fetch{},
+		&Read{w}, &Write{w}, &Edit{w}, &Ls{w}, &Find{w}, &Grep{w}, &Bash{w}, &Job{}, &Fetch{},
 	}
 }
 

@@ -63,7 +63,7 @@ func gitContext(cwd string) string {
 	return strings.Join(lines, "\n")
 }
 
-func ground(context string, withGit bool, cwd string) string {
+func ground(context string, withGit bool, cwd string, notes []string) string {
 	parts := []string{}
 	if context != "" {
 		parts = append(parts, context)
@@ -72,6 +72,10 @@ func ground(context string, withGit bool, cwd string) string {
 		if g := gitContext(cwd); g != "" {
 			parts = append(parts, g)
 		}
+	}
+	if len(notes) > 0 {
+		parts = append(parts, "## memory\nWhat earlier sessions here noted with the memory tool. "+
+			"Trust it, and correct it there when it proves wrong.\n- "+strings.Join(notes, "\n- "))
 	}
 	return strings.Join(parts, "\n\n")
 }

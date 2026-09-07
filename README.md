@@ -13,7 +13,7 @@ Italian for backpack: the provider clients, the turn loop, the tools and the
 UI are all written here, with three dependencies, all of them for drawing.
 
 * **Five providers**, spoken over their raw HTTP APIs: Anthropic, Gemini, OpenAI, Grok, OpenRouter
-* **Eight tools** — `read`, `write`, `edit`, `bash`, `grep`, `find`, `ls`, `fetch` — plus `task` for subagents and MCP servers over stdio
+* **Eight tools** — `read`, `write`, `edit`, `bash`, `grep`, `find`, `ls`, `fetch` — plus `task` for subagents, `job` for what `bash` left running in the background, `memory` and `todo`, and MCP servers over stdio
 * **A full-screen UI** with a walkable transcript, vim editing, and a plain REPL for pipes
 * **Sessions as a tree**: resume, `/rewind`, branch, and see the whole thing on a `/journey` map
 
@@ -77,6 +77,10 @@ accept-edits   edits go through, ask before running or fetching
 plan           read only — nothing is written or run
 bypass         everything goes through unasked
 ```
+
+In `plan` mode the model lays its plan out with `todo` and stops; `/todo`
+shows it, and `⇧⇥` out of plan mode lets the work start. The same list keeps
+the plan of any longer task, ticked off as it goes.
 
 When zaino asks, `y` allows once, `a` allows that tool and target for the
 session, `n` refuses — and a refusal is not an error, the model is told and
@@ -154,7 +158,9 @@ pins it outright.
 `task` can run by name; `mcp.json` declares MCP servers. A `ZAINO.md` in the
 repository is read every run and says where zaino is, not what it is for.
 The branch, what is changed and the last few commits go in beside it;
-`-git=false`, or `"git": false`, leaves them out.
+`-git=false`, or `"git": false`, leaves them out. What the model notes with
+its `memory` tool — conventions, gotchas, how the tests run — goes in too,
+from `~/.local/share/zaino/memory/<project>.md`; `/memory` shows it.
 
 ## Development
 

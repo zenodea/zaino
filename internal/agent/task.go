@@ -240,6 +240,10 @@ func deepen(tools []tool.Tool, parent *Agent, depth int) []tool.Tool {
 			out = append(out, &Task{parent: parent, depth: depth})
 			continue
 		}
+		if _, ok := t.(*tool.Todo); ok {
+			out = append(out, tool.NewTodo())
+			continue
+		}
 		out = append(out, t)
 	}
 	return out
