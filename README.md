@@ -134,7 +134,8 @@ Two files with the same shape, project over user, and a flag beats both:
   "profiles": {
     "cheap": {"model": "claude-haiku-4-5", "effort": "low"},
     "deep":  {"model": "claude-opus-5", "effort": "max", "thinking": true}
-  }
+  },
+  "windows": {"my-local-model": 32000}
 }
 ```
 
@@ -144,9 +145,15 @@ the next zaino in that project starts from. It lives in
 the project's, and never beats a flag; a project you have not picked in yet
 starts from the most recent pick anywhere. `-no-config` leaves it alone too.
 
+The context window follows the model — 200k for Claude, 1M for Gemini, and
+so on — and `windows` covers one zaino has not heard of; `-context-window`
+pins it outright.
+
 `system.md` beside it is the system prompt; `agents/*.md` describes subagents
 `task` can run by name; `mcp.json` declares MCP servers. A `ZAINO.md` in the
 repository is read every run and says where zaino is, not what it is for.
+The branch, what is changed and the last few commits go in beside it;
+`-git=false`, or `"git": false`, leaves them out.
 
 ## Development
 

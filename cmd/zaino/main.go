@@ -60,13 +60,14 @@ func run() error {
 		mcpConfig    = flag.String("mcp", "", "MCP servers to connect to (default: the mcp.json files in your config)")
 		noMCP        = flag.Bool("no-mcp", false, "do not connect to any MCP server")
 
-		contextWindow = flag.Int("context-window", agent.DefaultWindow,
-			"tokens the model can hold before older messages are folded into a summary")
+		contextWindow = flag.Int("context-window", 0,
+			"tokens the model can hold before older messages are folded into a summary (default: the model's own)")
 		noCompact = flag.Bool("no-compact", false, "never summarise, and fail when the window fills")
 
 		maxContext = flag.String("max-context", "off",
 			"stop the session when the context passes this many tokens: 200k, 200000, off")
 
+		gitCtx  = flag.Bool("git", true, "put the branch, status and recent commits in the context")
 		vimKeys = flag.Bool("vim", true, "modal editing in the composer; -vim=false for plain input")
 		mouse   = flag.Bool("mouse", false,
 			"scroll with the wheel, at the cost of selecting text with the mouse")
@@ -112,7 +113,7 @@ func run() error {
 		provider: providerName, model: model, maxTokens: maxTokens, effort: effort,
 		system: system, thinking: showThink, permission: permMode, allowOutside: allowOutside,
 		tools: toolNames, excludeTools: excludeTools, contextWindow: contextWindow,
-		maxContext: maxContext, vim: vimKeys, mouse: mouse, animate: animate,
+		maxContext: maxContext, vim: vimKeys, mouse: mouse, animate: animate, git: gitCtx,
 	}
 	if err := settings.apply(cfg, *profile, given); err != nil {
 		return err
@@ -191,12 +192,15 @@ func run() error {
 		Model:     *model,
 		MaxTokens: *maxTokens,
 		System:    *system,
-		Project:   cfg.Context,
+		Project:   ground(cfg.Context, *gitCtx, cwd),
 		Subagents: cfg.Subagents,
 		Effort:    *effort,
 		Thinking:  &llm.Thinking{Enabled: true, Show: *showThink},
 		Tools:     tools,
 		Gate:      gate,
+	}
+	for id, tokens := range cfg.Windows {
+		agent.SetWindow(id, tokens)
 	}
 	if !*noCompact {
 		ag.Compaction = &agent.Compaction{Window: *contextWindow}

@@ -24,11 +24,12 @@ type Compaction struct {
 	KeepRecent int
 }
 
-func (c *Compaction) window() int     { return orDefault(c.Window, DefaultWindow) }
 func (c *Compaction) reserve() int    { return orDefault(c.Reserve, DefaultReserve) }
 func (c *Compaction) keepRecent() int { return orDefault(c.KeepRecent, DefaultKeepRecent) }
 
-func (c *Compaction) budget() int { return max(c.window()-c.reserve(), c.keepRecent()) }
+func (a *Agent) budget() int {
+	return max(a.Window()-a.Compaction.reserve(), a.Compaction.keepRecent())
+}
 
 // The last turn's own numbers are the only true measure of what the provider
 // counted; the estimate is what stands in before there has been one.
@@ -40,7 +41,7 @@ func (a *Agent) contextSize(history []llm.Message) int {
 }
 
 func (a *Agent) shouldCompact(history []llm.Message) bool {
-	return a.Compaction != nil && len(history) > 1 && a.contextSize(history) > a.Compaction.budget()
+	return a.Compaction != nil && len(history) > 1 && a.contextSize(history) > a.budget()
 }
 
 // Fold compacts on demand, whatever the context is currently costing.

@@ -30,6 +30,7 @@ type knobs struct {
 	vim           *bool
 	mouse         *bool
 	animate       *bool
+	git           *bool
 }
 
 func (k knobs) apply(c *config.Config, profile string, given map[string]bool) error {
@@ -64,6 +65,7 @@ func (k knobs) apply(c *config.Config, profile string, given map[string]bool) er
 	yes("vim", k.vim, c.Vim)
 	yes("mouse", k.mouse, c.Mouse)
 	yes("animate", k.animate, c.Animate)
+	yes("git", k.git, c.Git)
 
 	// A profile is a deliberate pick, so it beats the plain keys around it —
 	// but still not a flag.

@@ -35,6 +35,7 @@ type File struct {
 	Vim           *bool              `json:"vim,omitempty"`
 	Mouse         *bool              `json:"mouse,omitempty"`
 	Animate       *bool              `json:"animate,omitempty"`
+	Git           *bool              `json:"git,omitempty"`
 	Allow         []string           `json:"allow,omitempty"`
 	Deny          []string           `json:"deny,omitempty"`
 	Profile       string             `json:"profile,omitempty"`
@@ -43,6 +44,9 @@ type File struct {
 	// What a model costs, per million tokens, for the ones zaino does not
 	// know or the host does not say.
 	Prices map[string]Price `json:"prices,omitempty"`
+
+	// How many tokens a model holds, for the ones zaino does not know.
+	Windows map[string]int `json:"windows,omitempty"`
 }
 
 type Price struct {
@@ -192,6 +196,7 @@ func (f *File) merge(o File) {
 	setBool(&f.Vim, o.Vim)
 	setBool(&f.Mouse, o.Mouse)
 	setBool(&f.Animate, o.Animate)
+	setBool(&f.Git, o.Git)
 
 	if len(o.Tools) > 0 {
 		f.Tools = o.Tools
@@ -207,6 +212,12 @@ func (f *File) merge(o File) {
 	}
 	for name, p := range o.Profiles {
 		f.Profiles[name] = p
+	}
+	if len(o.Windows) > 0 && f.Windows == nil {
+		f.Windows = map[string]int{}
+	}
+	for id, n := range o.Windows {
+		f.Windows[id] = n
 	}
 }
 

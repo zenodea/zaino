@@ -106,11 +106,18 @@ func (a *Agent) Ceiling() int {
 	return a.Window()
 }
 
+// Window is the explicit size if one was given, else the model's own.
 func (a *Agent) Window() int {
 	if a.Compaction == nil {
 		return 0
 	}
-	return a.Compaction.window()
+	if a.Compaction.Window > 0 {
+		return a.Compaction.Window
+	}
+	if n := WindowFor(a.modelID()); n > 0 {
+		return n
+	}
+	return DefaultWindow
 }
 
 // Steer hands a running turn something said while it worked. It travels with
