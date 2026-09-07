@@ -3,6 +3,7 @@
   --paper:   #fdf8ec;
   --sand:    #e7dcc3;
   --ink:     #23201a;
+  --line:    #23201a;
   --ink-2:   #5c5347;
   --faint:   #8d8271;
 
@@ -37,6 +38,7 @@
     --paper:   #221f19;
     --sand:    #2e2a22;
     --ink:     #f0e7d5;
+    --line:    #5a5145;
     --ink-2:   #b8ad99;
     --faint:   #8a8071;
     --rust:    #e2733f;
@@ -56,6 +58,7 @@
   --paper:   #221f19;
   --sand:    #2e2a22;
   --ink:     #f0e7d5;
+  --line:    #5a5145;
   --ink-2:   #b8ad99;
   --faint:   #8a8071;
   --rust:    #e2733f;
@@ -97,14 +100,14 @@ a { color: inherit; }
 
 code {
   font-family: var(--mono); font-size: 0.86em;
-  background: var(--sand); border: 1.5px solid var(--ink);
+  background: var(--sand); border: 1.5px solid var(--line);
   border-radius: 4px; padding: 0.06em 0.34em;
   white-space: nowrap;              /* so -flags never break at the hyphen */
 }
 kbd {
   font-family: var(--mono); font-size: 0.78em; font-weight: 700;
   background: var(--paper); color: var(--ink);
-  border: 1.5px solid var(--ink); border-bottom-width: 3px;
+  border: 1.5px solid var(--line); border-bottom-width: 3px;
   border-radius: 5px; padding: 0.1em 0.4em;
 }
 
@@ -159,6 +162,9 @@ h2.big code { font-size: .72em; vertical-align: .1em; }
 
 @keyframes rise { from { opacity: 0; translate: 0 14px; } }
 
+:root[data-js]:not([data-ready]) body { opacity: 0; }
+:root[data-js] body { transition: opacity .45s ease; }
+
 :root[data-js] [data-reveal]:not([data-revealed]),
 :root[data-js] [data-stagger]:not([data-revealed]) > * { opacity: 0; }
 
@@ -194,3 +200,13 @@ h2.big code { font-size: .72em; vertical-align: .1em; }
     transition-duration: 1ms !important;
   }
 }
+
+/* The page scrollbar is a zip, drawn by the Zip component below the header;
+   the browser's own bar stays out of the way. */
+:root { --zip-w: 30px; }
+@media (max-width: 640px) { :root { --zip-w: 20px; } }
+html { scrollbar-width: none; }
+html::-webkit-scrollbar { display: none; }
+body { padding-right: var(--zip-w); }
+body header, body footer { margin-right: calc(-1 * var(--zip-w)); }
+body header .wrap, body footer .wrap { max-width: calc(var(--w) + var(--zip-w)); padding-right: calc(26px + var(--zip-w)); }

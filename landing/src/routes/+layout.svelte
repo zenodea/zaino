@@ -2,6 +2,7 @@
   import '../app.css';
   import Header from '$lib/components/Header.svelte';
   import Footer from '$lib/components/Footer.svelte';
+  import Zip from '$lib/components/Zip.svelte';
 
   let { children } = $props();
 </script>
@@ -11,3 +12,4 @@
 <Header />
 <main id="main">{@render children()}</main>
 <Footer />
+<Zip />

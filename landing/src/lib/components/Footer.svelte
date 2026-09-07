@@ -5,7 +5,7 @@
 
 <footer class="foot">
   <div class="wrap foot-in">
-    <span>🎒 <b><Wordmark /></b> · an agent harness in Go</span>
+    <span><b><Wordmark /></b> · an agent harness in Go</span>
     <span class="foot-links">
       <a href={repo}>GitHub</a>
       <a href="{repo}/issues">Issues</a>
@@ -15,7 +15,7 @@
 </footer>
 
 <style>
-  .foot { background: var(--ink); color: var(--canvas); padding: 26px 0; }
+  .foot { position: sticky; bottom: 0; z-index: 40; background: var(--term); color: var(--term-fg); padding: 26px 0; }
   .foot-in { display: flex; flex-wrap: wrap; gap: 14px; align-items: center; font-size: 14px; }
   .foot-in b { font-family: var(--disp); font-weight: 800; }
   .foot-links { margin-left: auto; display: flex; gap: 18px; }

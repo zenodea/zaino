@@ -12,7 +12,8 @@
     />
     <link
       rel="icon"
-      href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><text y='19' font-size='19'>🎒</text></svg>"
+      type="image/png"
+      href="/favicon.png"
     />
     <script>
       // Both before first paint: a saved dark theme must not flash light, and
@@ -22,6 +23,7 @@
         if (saved) document.documentElement.dataset.theme = saved;
       } catch {}
       document.documentElement.dataset.js = '';
+      setTimeout(() => { document.documentElement.dataset.ready = ''; }, 2000);
     </script>
     %sveltekit.head%
   </head>

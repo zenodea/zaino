@@ -8,19 +8,23 @@
   <div class="wrap two roomy">
     <div data-stagger use:reveal>
       <p class="kick">The journey</p>
-      <h2 class="big">Nothing you tried<br />is lost.</h2>
+      <h2 class="big">Every branch kept,<br />files too.</h2>
       <p class="body-copy">
-        <code>/rewind</code> takes the conversation up again from an earlier
-        turn: your prompt comes back to the composer to be changed and asked
-        again, and everything after it leaves the context. Nothing is deleted:
-        the turns you walk away from stay in the file, on a branch of their
-        own. The file has always been a tree.
+        <code>/rewind</code> takes the conversation back to an earlier prompt.
+        The prompt returns to the composer, everything after it leaves the
+        context, and nothing is deleted: the turns you leave stay in the session
+        file on a branch of their own. <code>/journey</code> draws the whole
+        file, every turn on every branch, and you can jump to any point on it,
+        including ones you left behind.
       </p>
       <p class="body-copy dim">
-        <code>/journey</code> draws that file whole: every turn on every road,
-        the abandoned ones dimmed. Pick any stop, lit or not, and the context
-        is rebuilt as it stood there. A rewind walks back along the road you
-        are on; a journey can cross to one you left.
+        Files go with you. <code>write</code> and <code>edit</code> keep what
+        they changed, so moving to another point on the tree offers to put the
+        files back the way they were there, however many jumps and branches
+        away. Anything changed outside zaino in the meantime is left alone
+        unless you say otherwise, <code>bash</code> writes are not tracked, and
+        nothing under <code>.git</code> is ever touched. <code>/files</code>
+        lists what the current branch changed.
       </p>
     </div>
 
@@ -37,7 +41,7 @@
 
         <!-- Roads left behind: the oldest attempt keeps its lane. -->
         <path class="road left leftA" d="M 60 170 L 60 365" />
-        <path class="road left leftB" d="M 180 342 L 180 430" />
+        <path class="road left leftB" d="M 180 315 L 180 430" />
 
         <!-- The taken road curves out of every fork. -->
         <path class="road main" pathLength="1"
@@ -81,8 +85,6 @@
 <style>
   .journey {
     background: var(--sand);
-    border-top: 3px solid var(--ink);
-    border-bottom: 3px solid var(--ink);
   }
 
   /* The map gets the wider half, so its labels stay legible. */
@@ -91,7 +93,7 @@
 
   .map {
     background: var(--canvas);
-    border: 3px solid var(--ink);
+    border: 3px solid var(--line);
     box-shadow: 6px 6px 0 var(--shadow);
     border-radius: 4px;
     padding: 18px 24px 14px;
@@ -104,8 +106,8 @@
     text-align: center; font-size: 10.5px; font-weight: 700;
     letter-spacing: .16em; color: var(--faint); margin: 0;
   }
-  .map-top { border-bottom: 2px dashed var(--ink); padding-bottom: 10px; }
-  .map-bot { border-top: 2px dashed var(--ink); padding-top: 10px; }
+  .map-top { border-bottom: 2px dashed var(--line); padding-bottom: 10px; }
+  .map-bot { border-top: 2px dashed var(--line); padding-top: 10px; }
 
   svg { display: block; width: 100%; height: auto; margin: 8px 0 4px; }
 
@@ -124,7 +126,7 @@
   .map.shown .leftB { animation: appear .5s ease both 1.45s, march 1.4s linear infinite; }
 
   .stop {
-    stroke: var(--ink); stroke-width: 2.5;
+    stroke: var(--line); stroke-width: 2.5;
     transform-box: fill-box; transform-origin: center;
   }
   .stop.on  { fill: var(--rust); }

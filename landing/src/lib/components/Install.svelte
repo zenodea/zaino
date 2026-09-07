@@ -29,7 +29,7 @@
     position: relative; display: flex; align-items: stretch;
     max-width: 620px;
     background: var(--paper);
-    border: 3px solid var(--ink);
+    border: 3px solid var(--line);
     border-radius: 10px;
     box-shadow: 6px 6px 0 var(--shadow);
     transform: rotate(-0.5deg);
@@ -38,7 +38,7 @@
 
   .tag-hole {
     flex: none; width: 34px;
-    border-right: 2px dashed var(--ink);
+    border-right: 2px dashed var(--line);
     background: var(--sand);
     border-radius: 7px 0 0 7px;
     position: relative;
@@ -46,7 +46,7 @@
   .tag-hole::after {
     content: ""; position: absolute; left: 11px; top: 50%; margin-top: -6px;
     width: 12px; height: 12px; border-radius: 50%;
-    border: 2px solid var(--ink); background: var(--canvas);
+    border: 2px solid var(--line); background: var(--canvas);
   }
   .tag-body { flex: 1; min-width: 0; padding: 10px 12px 12px; }
 
@@ -60,7 +60,7 @@
   }
   .tag-tabs button:hover { color: var(--ink); }
   .tag-tabs button[aria-selected="true"] {
-    background: var(--rust); color: #fff8ee; border-color: var(--ink);
+    background: var(--rust); color: #fff8ee; border-color: var(--line);
     font-weight: 700;
   }
 

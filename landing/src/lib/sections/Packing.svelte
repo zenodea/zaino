@@ -6,33 +6,33 @@
   <div class="wrap" data-stagger use:reveal>
     <h2 class="big">What's in the pack</h2>
     <p class="sub">
-      The clients, the loop, the composer and the transcript are written in
-      this repo, not wrapped from an SDK.
+      All of it is written in the repo. The three dependencies are for drawing
+      the UI, and nothing else is wrapped from an SDK.
     </p>
 
     <div class="slip lift">
       <p class="slip-top">Packing list</p>
       <ul data-stagger use:reveal>
-        <li>Streaming, and the turn loop that drives it</li>
-        <li>Eight tools: <code>read write edit bash grep find ls fetch</code></li>
-        <li><code>task</code>, which hands work to a second agent</li>
+        <li>The turn loop: stream, run the tools, feed the results back, repeat</li>
+        <li>Eight tools for the code: <code>read write edit bash grep find ls fetch</code></li>
+        <li><code>task</code>, <code>job</code>, <code>memory</code> and <code>todo</code> for the work around it</li>
         <li>MCP servers, spoken over stdio</li>
-        <li>Compaction when the context window fills</li>
         <li>
           Anthropic, Gemini, OpenAI, Grok <span class="amp">&amp;</span>
-          OpenRouter, hand-rolled
+          OpenRouter, each a few hundred lines of HTTP
         </li>
-        <li>Two frontends: full-screen TUI and a plain REPL</li>
-        <li>A vim-style composer, and a walkable transcript</li>
-        <li>Permissions, sessions, prompt recall</li>
+        <li>Compaction when the context fills, sized to the model you are on</li>
+        <li>A full-screen TUI, and a plain REPL for pipes and scripts</li>
+        <li>Vim editing in the composer, a transcript you can walk</li>
+        <li>Permission modes, allow and deny rules, hooks you write yourself</li>
         <li>
-          <code>/rewind</code> and <code>/journey</code>: the session as a
-          tree, every branch kept
+          Sessions as a tree: <code>/rewind</code>, <code>/journey</code>, and
+          the files put back to match
         </li>
         <li>Images, attached with <code>@path</code> or read from disk</li>
-        <li>Prompt caching on Anthropic, marked by hand</li>
+        <li>Prompt caching on Anthropic, a spend cap, per-model context windows</li>
         <li>Config files under <code>~/.config/zaino</code>, with profiles</li>
-        <li>Markdown rendering, wire logging</li>
+        <li>Markdown rendering, and a wire log of every request</li>
       </ul>
       <span class="stamp-all" aria-hidden="true">all packed</span>
     </div>
@@ -40,14 +40,14 @@
 </section>
 
 <style>
-  .packing { background: var(--paper); border-top: 3px solid var(--ink); border-bottom: 3px solid var(--ink); }
+  .packing { background: var(--paper); }
 
   .slip {
     position: relative;
     max-width: 880px;
     margin-inline: auto;
     background: var(--canvas);
-    border: 3px solid var(--ink);
+    border: 3px solid var(--line);
     border-radius: 12px;
     box-shadow: 6px 6px 0 var(--shadow);
     padding: 20px 30px 26px;
@@ -60,7 +60,7 @@
     text-align: center; margin: 0 0 6px;
     font-family: var(--mono); font-size: 10.5px; font-weight: 700;
     letter-spacing: .16em; text-transform: uppercase; color: var(--faint);
-    border-bottom: 2px dashed var(--ink); padding-bottom: 10px;
+    border-bottom: 2px dashed var(--line); padding-bottom: 10px;
   }
 
   .slip ul {
@@ -81,7 +81,7 @@
     display: inline-grid; place-items: center;
     width: 19px; height: 19px;
     background: var(--forest); color: var(--canvas);
-    border: 2px solid var(--ink); border-radius: 5px;
+    border: 2px solid var(--line); border-radius: 5px;
     font-family: var(--sans); font-size: 10px;
   }
   .amp { font-family: var(--disp); font-style: italic; color: var(--rust); }
@@ -91,7 +91,7 @@
     font-family: var(--mono); font-size: 11px; font-weight: 700;
     letter-spacing: .12em; text-transform: uppercase;
     background: var(--mustard); color: #23201a;
-    border: 2px solid var(--ink); border-radius: 5px;
+    border: 2px solid var(--line); border-radius: 5px;
     padding: 3px 11px;
     transform: rotate(-3deg);
     box-shadow: 2px 2px 0 var(--shadow);

@@ -48,7 +48,7 @@ HUD_GUT=3
 ANIM_RATIO=16
 # The pack scales with the window, but only to here. Past it the thing stops
 # reading as an illustration and starts reading as wallpaper.
-ANIM_MAX_H=20
+ANIM_MAX_H=34
 ANIM_PAD=0
 COLS=$(tput cols 2>/dev/null || echo 80)
 
@@ -134,7 +134,7 @@ zip_build() {
   # anim_ok sizes the zipper first and hangs the pack off it; without it (no
   # animation, no layout pass) fall back to the terminal.
   [ -n "${BARW:-}" ] || BARW=$((COLS - 2 * HUD_GUT))
-  [ "$BARW" -gt 62 ] && BARW=62
+  [ "$BARW" -gt 96 ] && BARW=96
   [ "$BARW" -lt 16 ] && BARW=16
 
   HUD_IND=
@@ -257,26 +257,42 @@ function addbox(m, x0, x1, y0, y1, z0, z1, hinge, bev, sy0, sy1) {
 
 function build() {
 	N = 0
-	addbox(1, -0.72, 0.72, -1.00, 0.20, -0.40, 0.40, 0, 0.68, -1.00, 0.84)
-	addbox(1, -0.66, 0.66, 0.20, 0.84, -0.37, 0.36, 0, 0.68, -1.00, 0.84)
-	addbox(3, -0.46, 0.46, -0.78, -0.12, 0.40, 0.55, 0, 0.85)   # front pocket
-	addbox(5, -0.04, 0.04, -0.20, -0.12, 0.55, 0.59, 0, 0.20)   # zip pull
-	addbox(3, -0.79, -0.72, -0.68, -0.16, -0.24, 0.24, 0, 0.80) # side pocket
-	addbox(3, 0.72, 0.79, -0.68, -0.16, -0.24, 0.24, 0, 0.80)   # side pocket
-	addbox(4, -0.44, -0.16, -0.90, 0.74, -0.55, -0.42, 0, 0.70) # strap
-	addbox(4, 0.16, 0.44, -0.90, 0.74, -0.55, -0.42, 0, 0.70)   # strap
-	# The handle stands behind the lid, not through it, or they fight for space.
+	addbox(1, -0.72, 0.72, -1.00, 0.20, -0.40, 0.40, 0, 0.68, -1.00, 0.72)
+	addbox(1, -0.68, 0.68, 0.20, 0.72, -0.38, 0.38, 0, 0.68, -1.00, 0.72)
+	addbox(3, -0.75, 0.75, -1.00, -0.55, -0.43, 0.43, 0, 0.60)  # base band
+	addbox(2, -0.77, 0.77, 0.68, 1.09, -0.42, 0.50, 0, 0.55)    # lid
+	addbox(2, -0.77, 0.77, 0.58, 0.70, 0.36, 0.54, 0, 0.40)     # lid lip
+	addbox(6, -0.88, 0.88, 1.17, 1.53, -0.22, 0.34, 0, 0.90, 1.08, 1.62)
+	addbox(6, -0.86, 0.86, 1.08, 1.62, -0.13, 0.25, 0, 0.90, 1.08, 1.62)
+	addbox(4, -0.49, -0.33, -0.13, 1.04, 0.50, 0.56, 0, 0.60)
+	addbox(4, 0.33, 0.49, -0.13, 1.04, 0.50, 0.56, 0, 0.60)
+	addbox(4, -0.49, -0.33, 1.62, 1.68, -0.28, 0.38, 0, 0.60)
+	addbox(4, 0.33, 0.49, 1.62, 1.68, -0.28, 0.38, 0, 0.60)
+	addbox(4, -0.49, -0.33, 1.17, 1.63, 0.34, 0.40, 0, 0.60)
+	addbox(4, 0.33, 0.49, 1.17, 1.63, 0.34, 0.40, 0, 0.60)
+	addbox(5, -0.51, -0.31, -0.07, 0.11, 0.56, 0.62, 0, 0.20)
+	addbox(5, 0.31, 0.51, -0.07, 0.11, 0.56, 0.62, 0, 0.20)
+	addbox(4, -0.76, 0.76, 0.21, 0.33, 0.50, 0.55, 0, 0.60)
+	addbox(5, 0.46, 0.66, 0.18, 0.36, 0.56, 0.62, 0, 0.20)
+	addbox(3, -0.58, 0.58, -0.68, -0.12, 0.40, 0.79, 0, 0.85)
+	addbox(3, -0.60, 0.60, -0.22, -0.03, 0.40, 0.83, 0, 0.60)
+	addbox(4, -0.39, -0.25, -0.60, -0.05, 0.83, 0.88, 0, 0.60)
+	addbox(4, 0.25, 0.39, -0.60, -0.05, 0.83, 0.88, 0, 0.60)
+	addbox(5, -0.41, -0.23, -0.61, -0.43, 0.88, 0.93, 0, 0.20)
+	addbox(5, 0.23, 0.41, -0.61, -0.43, 0.88, 0.93, 0, 0.20)
+	addbox(3, -1.00, -0.69, -0.50, 0.22, -0.26, 0.30, 0, 0.80)
+	addbox(3, 0.69, 1.00, -0.50, 0.22, -0.26, 0.30, 0, 0.80)
+	addbox(3, -1.01, -0.68, 0.21, 0.39, -0.27, 0.31, 0, 0.60)
+	addbox(3, 0.68, 1.01, 0.21, 0.39, -0.27, 0.31, 0, 0.60)
+	addbox(4, -0.49, -0.27, -0.85, 0.85, -0.55, -0.42, 0, 0.70)
+	addbox(4, 0.27, 0.49, -0.85, 0.85, -0.55, -0.42, 0, 0.70)
 	addbox(4, -0.17, -0.10, 0.78, 1.00, -0.53, -0.43, 0, 0.45)
 	addbox(4, 0.10, 0.17, 0.78, 1.00, -0.53, -0.43, 0, 0.45)
 	addbox(4, -0.17, 0.17, 1.00, 1.06, -0.53, -0.43, 0, 0.45)
-	# Hinge-local coordinates: a plate over the top, a lip hanging down the front.
-	addbox(2, -0.68, 0.68, -0.06, 0.04, 0.02, 0.82, 1, 0.30)
-	addbox(2, -0.68, 0.68, -0.30, 0.04, 0.80, 0.90, 1, 0.35)
-	addbox(5, -0.08, 0.08, -0.26, -0.16, 0.90, 0.94, 1, 0.30)
 }
 
 # A sphere around each box in world space. Most pixels are background, and a
-# pixel that does reach the pack still misses eleven of the fourteen boxes; the
+# pixel that does reach the pack still misses most of its thirty-odd boxes; the
 # sphere answers that for a tenth of what the slab test costs.
 function spheres(   b, cx, cy, cz, dx, dy, dz, ty) {
 	for (b = 1; b <= N; b++) {
@@ -376,21 +392,23 @@ BEGIN {
 	for (pi = 0; pi < PAD; pi++) IND = IND " "
 	RAMP = "..::--~~==++**##%%@@"
 	NRAMP = length(RAMP)
-	PERIOD = 32                   # frames per revolution
+	PERIOD = 48                   # frames per revolution
 	DONEF = TMPD "/code"          # the worker writes it when the work is over
 
 	build()
 
-	split("52 88 124 130 166 202 208 214", P1, " ")     # sack: rust
-	split("94 130 166 172 208 214 220 222", P2, " ")     # lid: a lighter canvas
-	split("58 94 130 136 172 178 214 221", P3, " ")     # pockets
-	split("232 234 236 239 242 245 249 253", P4, " ")   # straps: charcoal
-	split("94 136 178 214 220 226 227 230", P5, " ")    # buckles: brass
+	split("52 88 124 130 166 202 208 214", P1, " ")     # body: rust
+	split("52 52 88 124 130 166 202 208", P2, " ")      # lid: a darker rust
+	split("22 22 28 29 65 71 72 108", P3, " ")          # pockets and base: green
+	split("52 58 94 94 130 136 172 179", P4, " ")       # straps: brown
+	split("238 240 243 246 249 251 253 255", P5, " ")   # buckles: silver
+	split("58 94 101 137 143 179 180 186", P6, " ")     # bedroll: khaki
 	split("0;31 0;31 0;31 1;31 1;31 1;31 1;33 1;33", Q1, " ")
-	split("0;31 0;31 1;31 1;31 1;31 1;33 1;33 1;33", Q2, " ")
-	split("0;33 0;33 0;33 1;33 1;33 1;33 1;37 1;37", Q3, " ")
-	split("0;30 0;30 1;30 1;30 1;30 0;37 0;37 1;37", Q4, " ")
-	split("0;33 0;33 1;33 1;33 1;33 1;37 1;37 1;37", Q5, " ")
+	split("0;31 0;31 0;31 0;31 1;31 1;31 1;31 1;33", Q2, " ")
+	split("0;32 0;32 0;32 1;32 1;32 1;32 1;32 1;37", Q3, " ")
+	split("0;33 0;33 0;33 0;33 1;33 1;33 1;33 1;37", Q4, " ")
+	split("0;37 0;37 0;37 1;37 1;37 1;37 1;37 1;37", Q5, " ")
+	split("0;33 0;33 0;33 1;33 1;33 1;33 1;37 1;37", Q6, " ")
 	SPARK = (COLOR == 256 ? ESC "[38;5;229m" : (COLOR == "none" ? "" : ESC "[1;33m"))
 
 	# Looking down on the pack makes its top a lit surface, not a silhouette edge.
@@ -399,9 +417,8 @@ BEGIN {
 	EYED = 5.4
 	EY = EYED * SP; EZ = EYED * CP
 	FOCAL = 4.3
-	# The pack reaches 1.10 below its centre, and a row of gutter keeps it off
-	# the header and the zipper.
-	HALFH = 1.10 * H / (H - 2)
+	YOFF = 0.22
+	HALFH = 1.62 * H / (H - 2)
 	HALFW = HALFH * (W / H) * 0.5   # terminal cells are about twice as tall as wide
 
 	LX = -0.42; LY = 0.72; LZ = 0.66
@@ -416,20 +433,22 @@ BEGIN {
 	# The lid stays shut, so the hinge transform is the identity.
 	CF = 1; SF = 0
 	spheres()
-	WHOLE = 2.45                  # one sphere around the whole pack
+	WHOLE = 4.8                   # one sphere around the whole pack
 
-	done = 0; spin = -1
+	done = 0; spin = 0; parked = 0
 	for (f = 0; ; f++) {
-		# The pack faces front and floats while the work runs; it turns to show
-		# itself off once the work is done, and stops facing front again.
 		if (!done) {
-			if ((getline junk < DONEF) >= 0) { done = 1; spin = 0 }
+			if ((getline junk < DONEF) >= 0) done = 1
 			close(DONEF)
-		} else spin++
+		}
+		if (!parked) {
+			spin++
+			if (done && spin % PERIOD == 0) parked = 1
+		}
 
-		theta = (done ? 2 * PI * (spin % PERIOD) / PERIOD : 0)
-		front = (done && spin > 0 && spin % PERIOD == 0)
-		BOB = -0.03 + (done ? 0.05 : 0.10) * sin(f * 0.38)
+		theta = (parked ? 0 : 2 * PI * (spin % PERIOD) / PERIOD)
+		front = parked
+		BOB = -0.03 + (parked ? 0.10 : 0.04) * sin(f * 0.38)
 		CT = cos(theta); ST = sin(theta)
 
 		# A header the player consumes but does not draw: the spin is left facing
@@ -461,7 +480,7 @@ function render(   i, j, sx, sy, dx, dy, dz, len, ox, oy, oz, rx, ry, rz,
 		row = ""; last = ""
 		for (i = 0; i < W; i++) {
 			sx = (2 * (i + 0.5) / W - 1) * HALFW
-			sy = (1 - 2 * (j + 0.5) / H) * HALFH - BOB
+			sy = (1 - 2 * (j + 0.5) / H) * HALFH + YOFF - BOB
 			dx = sx; dy = sy; dz = -FOCAL
 			len = sqrt(dx * dx + dy * dy + dz * dz)
 			dx /= len; dy /= len; dz /= len
@@ -538,13 +557,15 @@ function shade(m, inten,   k) {
 		if (m == 2) return ESC "[38;5;" P2[k] "m"
 		if (m == 3) return ESC "[38;5;" P3[k] "m"
 		if (m == 4) return ESC "[38;5;" P4[k] "m"
-		return ESC "[38;5;" P5[k] "m"
+		if (m == 5) return ESC "[38;5;" P5[k] "m"
+		return ESC "[38;5;" P6[k] "m"
 	}
 	if (m == 1) return ESC "[" Q1[k] "m"
 	if (m == 2) return ESC "[" Q2[k] "m"
 	if (m == 3) return ESC "[" Q3[k] "m"
 	if (m == 4) return ESC "[" Q4[k] "m"
-	return ESC "[" Q5[k] "m"
+	if (m == 5) return ESC "[" Q5[k] "m"
+	return ESC "[" Q6[k] "m"
 }
 AWK
 }

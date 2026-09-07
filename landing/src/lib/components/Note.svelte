@@ -9,7 +9,7 @@
 
 <style>
   .note {
-    background: var(--paper); border: 3px solid var(--ink); border-radius: 12px;
+    background: var(--paper); border: 3px solid var(--line); border-radius: 12px;
     box-shadow: 5px 5px 0 var(--shadow); padding: 22px 22px 18px;
   }
   .note:hover { box-shadow: 7px 7px 0 var(--shadow); }

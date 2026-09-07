@@ -54,7 +54,7 @@
 
   .cmd.solo {
     max-width: 660px; margin: 0 auto; text-align: left;
-    border: 3px solid var(--ink); border-radius: 8px;
+    border: 3px solid var(--line); border-radius: 8px;
     box-shadow: 6px 6px 0 rgba(0,0,0,.45);
   }
 </style>

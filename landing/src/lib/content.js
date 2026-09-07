@@ -11,78 +11,49 @@ export const installs = [
 
 export const nav = [
   { href: '#pack', label: 'the pack' },
-  { href: '#reach', label: 'tools' },
-  { href: '#pockets', label: 'pockets' },
+  { href: '#hooks', label: 'hooks' },
+  { href: '#vim', label: 'vim' },
   { href: '#journey', label: 'journey' },
   { href: '#drive', label: 'commands' }
 ];
 
 export const packParts = [
-  { part: 'The lid', feat: 'five hand-rolled clients' },
-  { part: 'Main compartment', feat: 'the turn loop' },
-  { part: 'Front pocket', feat: 'eight tools' },
-  { part: 'Haul loop', feat: 'one binary, no runtime' },
-  { part: 'The buckle', feat: 'asks before it acts' },
-  { part: 'Side pocket', feat: 'MCP, over stdio' },
-  { part: 'Reinforced base', feat: 'tested throughout' }
-];
-
-export const tools = ['read', 'write', 'edit', 'bash', 'grep', 'find', 'ls', 'fetch'];
-
-export const permissionModes = [
-  {
-    name: 'manual',
-    desc: 'Ask before writing, running or fetching.',
-    stamp: 'default'
-  },
-  {
-    name: 'accept-edits',
-    desc: 'Edits go through. Still asks before running or fetching.'
-  },
-  {
-    name: 'plan',
-    desc: 'Read only. Nothing written or run, but pages can still be read.'
-  },
-  {
-    name: 'bypass',
-    desc: 'Everything goes through unasked.',
-    stamp: 'on you',
-    warn: true,
-    open: true
-  }
+  { id: 'bedroll', part: 'The bedroll', feat: 'five hand-rolled clients' },
+  { id: 'main', part: 'Main compartment', feat: 'the turn loop' },
+  { id: 'pocket', part: 'Front pocket', feat: 'twelve tools' },
+  { id: 'lid', part: 'The lid', feat: 'one binary, no runtime' },
+  { id: 'buckle', part: 'The buckle', feat: 'asks before it acts' },
+  { id: 'side', part: 'Side pocket', feat: 'MCP, over stdio' },
+  { id: 'base', part: 'Reinforced base', feat: 'tested throughout' }
 ];
 
 export const commands = [
   [
-    ['/clear', 'forget the conversation'],
     ['/model', 'show or change the model'],
     ['/provider', 'switch provider'],
-    ['/effort', 'show or set output effort'],
-    ['/thinking', "show or hide the model's reasoning"],
-    ['/system', 'show, set, or drop the system prompt'],
-    ['/profile', 'switch to a named bundle of settings'],
-    ['/config', 'what the config files came to'],
-    ['/compact', 'fold the conversation into a summary'],
-    ['/limit', 'stop when the context passes a ceiling']
+    ['/effort', 'how hard it thinks before answering'],
+    ['/profile', 'a named bundle of settings'],
+    ['/permission', 'when tools stop to ask'],
+    ['/limit', 'a ceiling on the context'],
+    ['/spend', 'a ceiling on the cost'],
+    ['/usage', 'tokens and dollars so far']
   ],
   [
-    ['/rewind', 'take it up again from an earlier turn'],
-    ['/journey', 'the tree of turns, every branch included'],
-    ['/permission', 'when tools stop to ask'],
-    ['/tools', 'list the tools the model has'],
-    ['/usage', 'token usage for this session'],
+    ['/rewind', 'back to an earlier prompt'],
+    ['/journey', 'the whole tree, every branch'],
     ['/sessions', 'pick up an earlier conversation'],
-    ['/vim', 'modal editing in the composer'],
-    ['/bro', 'say the last answer again, simply'],
-    ['/help', 'list the commands'],
-    ['/quit', 'leave zaino']
+    ['/files', 'what write and edit changed here'],
+    ['/todo', 'the plan, and how far it is'],
+    ['/memory', 'what it has noted about this project'],
+    ['/jobs', 'what is running in the background'],
+    ['/hooks', 'the scripts your config runs']
   ]
 ];
 
 export const keyHints = [
   { keys: ['⏎'], label: 'send' },
   { keys: ['⌥⏎'], label: 'newline' },
-  { keys: ['⌃j', '⌃k'], label: 'walk the chat' },
+  { keys: ['⌃j', '⌃k'], label: 'walk the transcript' },
   { keys: ['↑', '↓'], label: 'earlier prompts' },
   { keys: ['⇧⇥'], label: 'permission mode' },
   { keys: ['esc'], label: 'stop the turn' },

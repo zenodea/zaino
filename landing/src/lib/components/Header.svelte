@@ -11,12 +11,11 @@
 <header class="strap" class:carried={scrollY > 12}>
   <div class="wrap strap-in">
     <a class="brand" href="#top">
-      <span class="brand-mark">🎒</span>
       <Wordmark />
     </a>
     <nav class="strap-links">
-      {#each nav as { href, label } (href)}
-        <a {href}>{label}</a>
+      {#each nav as { href, label }, i (href)}
+        <a {href}><span class="n">{String(i + 1).padStart(2, '0')}</span>{label}</a>
       {/each}
     </nav>
     <a class="patch-link" href={repo}>github ↗</a>
@@ -31,7 +30,7 @@
   .strap {
     position: sticky; top: 0; z-index: 40;
     background: var(--deep);
-    border-bottom: 3px solid var(--ink);
+    border-bottom: 3px solid var(--line);
     color: var(--on-deep);
     transition: box-shadow .25s ease;
   }
@@ -60,16 +59,17 @@
     font-family: var(--disp); font-weight: 900; font-size: 21px;
     text-decoration: none; letter-spacing: -0.02em; flex: none;
   }
-  .brand-mark {
-    font-size: 19px; display: inline-block;
-    rotate: -8deg;
-  }
 
-  .strap-links { margin-left: auto; display: flex; gap: 20px; font-size: 14px; }
+  .strap-links {
+    margin-left: auto; display: flex; gap: 26px;
+    font-family: var(--mono); font-size: 12px; font-weight: 500;
+    letter-spacing: .12em; text-transform: uppercase;
+  }
   .strap-links a {
     position: relative; text-decoration: none; opacity: .78;
     transition: opacity .2s ease;
   }
+  .strap-links .n { color: var(--mustard); font-weight: 700; margin-right: 7px; }
   .strap-links a::after {
     content: ""; position: absolute; left: 0; right: 0; bottom: -5px; height: 2px;
     background: var(--mustard); transform: scaleX(0); transform-origin: 0 50%;

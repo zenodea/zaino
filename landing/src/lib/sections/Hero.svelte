@@ -1,6 +1,6 @@
 <script>
   import { reveal } from '$lib/reveal.js';
-  import Backpack from '$lib/components/Backpack.svelte';
+  import PackFigure from '$lib/components/PackFigure.svelte';
   import Install from '$lib/components/Install.svelte';
 </script>
 
@@ -14,9 +14,10 @@
       <h1>An agent harness<br />you can <em>carry.</em></h1>
 
       <p class="lede">
-        Five providers, eight tools, subagents and MCP in one Go binary, and
-        not an SDK in it. It asks before it writes or runs anything, and keeps
-        every road a conversation ever took.
+        A coding agent in one Go binary. It talks to Anthropic, Gemini, OpenAI,
+        Grok and OpenRouter over plain HTTP with no SDK in between, asks before
+        it writes or runs anything, keeps every branch of a conversation, and
+        can put your files back when you rewind.
       </p>
 
       <Install />
@@ -27,13 +28,13 @@
       </p>
     </div>
 
-    <Backpack delay={260} />
+    <PackFigure delay={260} />
   </div>
 </section>
 
 <style>
   .hero { padding: 64px 0 40px; }
-  .hero-grid { display: grid; grid-template-columns: 1.08fr 1fr; gap: 30px; align-items: center; }
+  .hero-grid { display: grid; grid-template-columns: 1fr 1.15fr; gap: 64px; align-items: center; }
   .hero-grid > :global(*) { min-width: 0; }   /* or they size to content and overflow */
   @media (max-width: 1000px) { .hero-grid { grid-template-columns: 1fr; gap: 20px; } }
 
@@ -41,7 +42,7 @@
     display: inline-block;
     font-family: var(--mono); font-size: 12.5px;
     background: var(--mustard); color: #23201a;
-    border: 2px solid var(--ink); border-radius: 6px;
+    border: 2px solid var(--line); border-radius: 6px;
     padding: 5px 12px 8px; margin-bottom: 26px;
     transform: rotate(-1.4deg);
     box-shadow: 3px 3px 0 var(--shadow);
@@ -60,7 +61,7 @@
     font-variation-settings: "SOFT" 60, "WONK" 1;
   }
 
-  .lede { max-width: min(46ch, 100%); font-size: 18px; color: var(--ink-2); margin-bottom: 34px; }
+  .lede { max-width: min(48ch, 100%); font-size: 18px; color: var(--ink-2); margin-bottom: 34px; }
 
   .fine { margin-top: 16px; font-size: 13px; color: var(--faint); font-family: var(--mono); }
   .fine code { font-size: .92em; }

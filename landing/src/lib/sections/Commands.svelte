@@ -9,15 +9,9 @@
     <p class="kick">Commands</p>
     <h2 class="big">Driving it</h2>
     <p class="sub">
-      A line starting with <code>/</code> acts on the session instead of going to
-      the model. A prompt that merely starts with a slash
-      (<code>/etc/hosts is wrong</code>) is still a prompt, and the panel knows
-      it.
-    </p>
-    <p class="sub">
-      A command that takes a value and is given none asks instead of explaining:
-      it opens a list with what is currently in effect marked. Passing the value
-      outright (<code>/effort low</code>) skips it.
+      A line starting with <code>/</code> is for zaino, not the model. The slash
+      opens a fuzzy menu; a command given no value opens a picker. Your own go
+      in <code>commands/&lt;name&gt;.md</code>.
     </p>
 
     <div class="cmds">
@@ -42,59 +36,31 @@
 
     <div class="notes">
       <Note>
-        {#snippet title()}Modal editing, on by default{/snippet}
+        {#snippet title()}The mouse stays the terminal's{/snippet}
         <p>
-          The composer starts in <b>insert</b>, so nothing is different until you
-          press <kbd>esc</kbd>. Then motions, operators with counts, and a visual
-          mode the composer draws itself, since the text box underneath can't
-          show a selected range. <code>-vim=false</code> turns it off.
+          Select and copy the way you do anywhere else. Scrolling is on the
+          keyboard; <code>-mouse</code> gives the wheel to zaino at the cost of
+          <kbd>⇧</kbd>-drag to select.
         </p>
       </Note>
 
       <Note>
         {#snippet title()}Walk the transcript{/snippet}
         <p>
-          <kbd>⌃j</kbd> and <kbd>⌃k</kbd> move a bar through the transcript one
-          entry at a time. With a tool call under the bar, <kbd>⏎</kbd> opens the
-          arguments it was called with and everything it returned. Typing hands
-          the keyboard back.
-        </p>
-      </Note>
-
-      <Note>
-        {#snippet title()}The mouse is left to the terminal{/snippet}
-        <p>
-          Select and copy the way you do anywhere else; scrolling is on the
-          keyboard instead. <code>-mouse</code> gives the wheel to zaino, at the
-          cost of needing <kbd>⇧</kbd>-drag to select.
-        </p>
-      </Note>
-
-      <Note>
-        {#snippet title()}<code>/clear</code> deletes nothing{/snippet}
-        <p>
-          A session is one append-only file of things that happened. What gets
-          sent is worked out from that record, so clearing just marks where the
-          context starts; the transcript before it stays readable.
+          <kbd>⌃j</kbd> and <kbd>⌃k</kbd> move a bar through the transcript.
+          <kbd>⏎</kbd> on a tool call opens what it was asked and what it
+          returned. A running turn does not lock the composer: type, and it goes
+          in with the next tool results.
         </p>
       </Note>
 
       <Note>
         {#snippet title()}Come back to it{/snippet}
         <p>
-          <code>-continue</code> is the newest run from this directory;
-          <code>-resume</code> takes any prefix of an id. The model, prompt,
-          effort and thinking come back as you left them.
-        </p>
-      </Note>
-
-      <Note>
-        {#snippet title()}Stopping, and leaving{/snippet}
-        <p>
-          <kbd>esc</kbd> stops a running turn, but only once vim has nothing
-          else for it to do. <kbd>⌃c</kbd> stops it too; with nothing running it
-          arms the quit and says so in the footer, and any other key stands it
-          down.
+          <code>-continue</code> picks up the newest session here,
+          <code>-resume</code> any prefix of an id, settings and all. A fresh
+          session starts on whatever provider, model and effort you last picked
+          in this project.
         </p>
       </Note>
     </div>
@@ -119,5 +85,7 @@
   }
 
   .keys { display: flex; flex-wrap: wrap; gap: 12px 24px; margin: 38px 0 0; font-size: 14px; color: var(--ink-2); }
+  .cmds dt { width: 9.4em; }
+  .cmds dd { padding-left: 9.4em; }
   .keys kbd { margin-right: 4px; }
 </style>
