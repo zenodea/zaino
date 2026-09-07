@@ -93,6 +93,7 @@ type Model struct {
 	memory         *tool.Memory
 	todo           *tool.Todo
 	blobs          *session.Blobs
+	root           string
 
 	entries  []entry
 	rendered []string

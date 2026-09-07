@@ -361,6 +361,7 @@ func (m *Model) visit(stop journeyStop) {
 	m.applyContext(ctx)
 	m.push(entry{kind: entryNotice, text: fmt.Sprintf(
 		"travelled · the conversation stands as it did %s, %d messages in", when(stop.at), len(ctx.Messages))})
+	m.offerRestore(entries, leaf, tip)
 }
 
 // contextAt is what the provider counted for the newest turn at that point.
@@ -431,6 +432,7 @@ func (m *Model) takeUp(stop journeyStop, did string) {
 		return
 	}
 
+	from, _ := store.Leaf()
 	ctx := session.BuildAt(entries, stop.parent)
 	if err := m.rec.Jump(stop.parent, len(ctx.Messages)); err != nil {
 		m.push(entry{kind: entryError, text: err.Error()})
@@ -441,6 +443,7 @@ func (m *Model) takeUp(stop journeyStop, did string) {
 	m.showRecalled(stop.prompt)
 	m.push(entry{kind: entryNotice, text: fmt.Sprintf(
 		"%s · %d messages lead here, and the prompt is back in the composer", did, len(ctx.Messages))})
+	m.offerRestore(entries, from, stop.parent)
 }
 
 // Two lines of heading, three of signpost.

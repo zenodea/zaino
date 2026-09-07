@@ -32,8 +32,8 @@ func (m *Model) UseMemory(mem *tool.Memory) { m.memory = mem }
 
 func (m *Model) UseTodo(t *tool.Todo) { m.todo = t }
 
-func (m *Model) UseCheckpoints(b *session.Blobs) {
-	m.blobs = b
+func (m *Model) UseCheckpoints(b *session.Blobs, root string) {
+	m.blobs, m.root = b, root
 	m.rec.UseBlobs(b)
 }
 

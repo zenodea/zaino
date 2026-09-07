@@ -163,6 +163,19 @@ The branch, what is changed and the last few commits go in beside it;
 its `memory` tool — conventions, gotchas, how the tests run — goes in too,
 from `~/.local/share/zaino/memory/<project>.md`; `/memory` shows it.
 
+## Checkpoints
+
+`write` and `edit` keep what a file held before and after, on the turn that
+changed it. Going back with `/rewind`, or anywhere on the `/journey` map,
+then asks whether to put the files back the way they were there — however
+far and across whichever branches, the way the conversation itself comes
+back. A file changed by something other than zaino since is left alone
+unless you say to overwrite it, `bash` writes are not seen and so not
+undone, and nothing under `.git` is ever touched: a restore shows up in
+`git status` like any other edit, and commits made in between stay.
+`/files` lists what this line of the conversation changed.
+`-checkpoints=false`, or `"checkpoints": false`, turns the whole thing off.
+
 ## Hooks
 
 Commands of your own that run at points in the loop, from the same config:

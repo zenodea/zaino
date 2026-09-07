@@ -311,7 +311,7 @@ func run() error {
 	m.UseRemembered(remembered)
 	m.UseMemory(memory)
 	m.UseTodo(todo)
-	m.UseCheckpoints(blobs)
+	m.UseCheckpoints(blobs, cwd)
 	if len(restored.Messages) > 0 {
 		m.Restore(restored)
 	}
